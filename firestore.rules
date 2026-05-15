@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // --- Entity Validations ---
+
+    function isValidUser(data) {
+      return data.uid == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && data.email == request.auth.token.email
+        && data.onboardingComplete is bool
+        && (data.sleepTargetHours is number && data.sleepTargetHours >= 0 && data.sleepTargetHours <= 24)
+        && (data.weeklyActivityTarget is int && data.weeklyActivityTarget >= 1)
+        && (data.dailyHealthyMealTarget is int && data.dailyHealthyMealTarget >= 1 && data.dailyHealthyMealTarget <= 5)
+        && (data.createdAt is string || data.createdAt is timestamp);
+    }
+
+    function isValidSleepLog(data) {
+      return data.userId == request.auth.uid
+        && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.hoursSlept is number && data.hoursSlept >= 0 && data.hoursSlept <= 24
+        && data.moodRating is int && data.moodRating >= 1 && data.moodRating <= 5;
+    }
+
+    function isValidMealLog(data) {
+      return data.userId == request.auth.uid
+        && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.mealSlot in ['breakfast', 'lunch', 'dinner', 'snack']
+        && data.proteinRating is int && data.proteinRating >= 1 && data.proteinRating <= 5
+        && data.fatRating is int && data.fatRating >= 1 && data.fatRating <= 5
+        && data.fibreRating is int && data.fibreRating >= 1 && data.fibreRating <= 5
+        && data.overallHealthRating is int && data.overallHealthRating >= 1 && data.overallHealthRating <= 5;
+    }
+
+    function isValidActivityLog(data) {
+      return data.userId == request.auth.uid
+        && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.activityType in ['self_logged', 'guided']
+        && data.durationMinutes is int && data.durationMinutes > 0 && data.durationMinutes <= 300
+        && data.intensity in ['light', 'moderate', 'hard'];
+    }
+
+    function isValidLoopScore(data) {
+      return data.userId == request.auth.uid
+        && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.sleepScore is int && data.sleepScore >= 0 && data.sleepScore <= 100
+        && data.eatScore is int && data.eatScore >= 0 && data.eatScore <= 100
+        && data.moveScore is int && data.moveScore >= 0 && data.moveScore <= 100
+        && data.overallScore is int && data.overallScore >= 0 && data.overallScore <= 100
+        && (data.computedAt is string || !('computedAt' in data));
+    }
+
+    function isValidNutritionNudge(data) {
+      return data.userId == request.auth.uid
+        && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.nudgeText is string && data.nudgeText.size() > 0;
+    }
+
+    function isValidWeeklyInsight(data) {
+      return data.userId == request.auth.uid
+        && data.weekStartDate.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.insightText is string && data.insightText.size() > 0;
+    }
+
+    // --- Collections ---
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId);
+      allow create: if isSignedIn() && isValidId(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming())
+                       && incoming().uid == existing().uid;
+    }
+
+    match /sleepLogs/{logId} {
+      allow get: if isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(logId) && isValidSleepLog(incoming());
+      allow update: if isOwner(existing().userId) && isValidSleepLog(incoming())
+                       && incoming().userId == existing().userId;
+      allow delete: if isOwner(existing().userId);
+    }
+
+    match /mealLogs/{logId} {
+      allow get: if isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(logId) && isValidMealLog(incoming());
+      allow update: if isOwner(existing().userId) && isValidMealLog(incoming())
+                       && incoming().userId == existing().userId;
+      allow delete: if isOwner(existing().userId);
+    }
+
+    match /activityLogs/{logId} {
+      allow get: if isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(logId) && isValidActivityLog(incoming());
+      allow update: if isOwner(existing().userId) && isValidActivityLog(incoming())
+                       && incoming().userId == existing().userId;
+      allow delete: if isOwner(existing().userId);
+    }
+
+    match /guidedWorkouts/{workoutId} {
+      allow read: if isSignedIn();
+      allow write: if false; // System only
+    }
+
+    match /loopScores/{scoreId} {
+      allow read: if isSignedIn() && isOwner(resource.data.userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(scoreId) && isValidLoopScore(incoming());
+      allow update: if isSignedIn() && isOwner(existing().userId) && isValidLoopScore(incoming())
+                       && incoming().userId == existing().userId;
+    }
+
+    match /nutritionNudges/{nudgeId} {
+      allow read: if isSignedIn() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isSignedIn() && isValidId(nudgeId) && isValidNutritionNudge(incoming());
+      allow update: if isSignedIn() && isOwner(existing().userId) && isValidNutritionNudge(incoming())
+                       && incoming().userId == existing().userId;
+    }
+
+    match /weeklyInsights/{insightId} {
+      allow read: if isSignedIn() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isSignedIn() && isValidId(insightId) && isValidWeeklyInsight(incoming());
+      allow update: if isSignedIn() && isOwner(existing().userId) && isValidWeeklyInsight(incoming())
+                       && incoming().userId == existing().userId;
+    }
+  }
+}

@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;800&family=Lexend:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Lexend", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Montserrat", sans-serif;
+
+  --color-navy: #0D1B4B;
+  --color-dark-blue: #1A2340;
+  --color-slate: #64748B;
+  --color-light-slate: #94A3B8;
+  --color-amber: #F59E0B;
+  --color-teal: #00C896;
+  --color-violet: #7C3AED;
+  --color-yellow: #FFD600;
+  --color-coral: #FF5C5C;
+  --color-off-white: #F1F5F9;
+
+  --shadow-ambient: 0 2px 12px rgba(13, 27, 75, 0.07);
+  --shadow-lifted: 0 4px 24px rgba(13, 27, 75, 0.10);
+
+  --radius-card: 16px;
+  --radius-button: 14px;
+  --radius-input: 14px;
+  --radius-pill: 22px;
+}
+
+@layer base {
+  body {
+    @apply bg-white text-dark-blue font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display text-navy;
+  }
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid #E2E8F0;
+}
+
+.domain-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.success-toast {
+  @apply fixed bottom-4 left-4 right-4 flex items-center justify-center p-4 rounded-xl text-white font-semibold shadow-lg z-50;
+}
+
+.markdown-body p {
+  @apply mb-4 leading-relaxed;
+}
+

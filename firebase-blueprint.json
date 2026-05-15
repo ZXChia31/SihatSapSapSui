@@ -1,0 +1,165 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account and health targets",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "sleepTargetBedtime": { "type": "string", "description": "HH:MM format" },
+        "sleepTargetWakeTime": { "type": "string", "description": "HH:MM format" },
+        "sleepTargetHours": { "type": "number" },
+        "weeklyActivityTarget": { "type": "integer" },
+        "dailyHealthyMealTarget": { "type": "integer" },
+        "onboardingComplete": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "onboardingComplete"]
+    },
+    "SleepLog": {
+      "title": "Sleep Log",
+      "description": "Records of daily sleep",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "bedtime": { "type": "string" },
+        "wakeTime": { "type": "string" },
+        "hoursSlept": { "type": "number" },
+        "moodRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+        "loggedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "date", "bedtime", "wakeTime", "hoursSlept", "moodRating"]
+    },
+    "MealLog": {
+      "title": "Meal Log",
+      "description": "Records of nutritional intake",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "mealName": { "type": "string" },
+        "mealSlot": { "type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"] },
+        "proteinRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+        "fatRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+        "fibreRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+        "overallHealthRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+        "loggedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "date", "mealName", "mealSlot"]
+    },
+    "ActivityLog": {
+      "title": "Activity Log",
+      "description": "Records of physical activity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "activityName": { "type": "string" },
+        "activityType": { "type": "string", "enum": ["self_logged", "guided"] },
+        "durationMinutes": { "type": "integer" },
+        "intensity": { "type": "string", "enum": ["light", "moderate", "hard"] },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "date", "activityName", "activityType", "durationMinutes", "intensity"]
+    },
+    "GuidedWorkout": {
+      "title": "Guided Workout",
+      "description": "Pre-defined exercises",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "durationMinutes": { "type": "integer" },
+        "energyCost": { "type": "string", "enum": ["low", "medium"] },
+        "exercises": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "required": ["title", "durationMinutes", "energyCost", "exercises"]
+    },
+    "LoopScore": {
+      "title": "Loop Score",
+      "description": "Daily health aggregate score",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "sleepScore": { "type": "integer" },
+        "eatScore": { "type": "integer" },
+        "moveScore": { "type": "integer" },
+        "overallScore": { "type": "integer" },
+        "computedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "date", "sleepScore", "eatScore", "moveScore", "overallScore"]
+    },
+    "NutritionNudge": {
+      "title": "Nutrition Nudge",
+      "description": "AI-generated meal advice",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "nudgeText": { "type": "string" },
+        "generatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "date", "nudgeText"]
+    },
+    "WeeklyInsight": {
+      "title": "Weekly Insight",
+      "description": "AI-generated weekly health pattern analysis",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "weekStartDate": { "type": "string", "format": "date" },
+        "insightText": { "type": "string" },
+        "generatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "weekStartDate", "insightText"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "sleepLogs/{logId}": {
+      "schema": "SleepLog",
+      "description": "Sleep logs"
+    },
+    "mealLogs/{logId}": {
+      "schema": "MealLog",
+      "description": "Meal logs"
+    },
+    "activityLogs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Activity logs"
+    },
+    "guidedWorkouts/{workoutId}": {
+      "schema": "GuidedWorkout",
+      "description": "Guided workouts"
+    },
+    "loopScores/{scoreId}": {
+      "schema": "LoopScore",
+      "description": "Daily loop scores"
+    },
+    "nutritionNudges/{nudgeId}": {
+      "schema": "NutritionNudge",
+      "description": "Daily nutrition nudges"
+    },
+    "weeklyInsights/{insightId}": {
+      "schema": "WeeklyInsight",
+      "description": "Weekly loop insights"
+    }
+  }
+}
