@@ -149,7 +149,7 @@ export function LoginScreen({ onSignIn }: LoginScreenProps) {
           <div className="flex items-center justify-center gap-8">
              <div className="flex flex-col items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-teal shadow-lg shadow-teal/20" />
-                <span className="text-[9px] font-black text-slate/40 uppercase tracking-[0.2em]">Rest</span>
+                <span className="text-[9px] font-black text-slate/40 uppercase tracking-[0.2em]">Sleep</span>
              </div>
              <div className="flex flex-col items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-amber shadow-lg shadow-amber/20" />

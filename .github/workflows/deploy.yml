@@ -5,7 +5,7 @@ on:
     branches: [ main ]
 
 env:
-  PROJECT_ID: ${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}
+  PROJECT_ID: gen-lang-client-0559469589
   SERVICE_NAME: sihatsapsapsui
   REGION: asia-southeast1
 
@@ -32,27 +32,14 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          GEMINI_API_KEY: ${{ secrets.REACT_APP_GEMINI_API_KEY }}
           VITE_FIREBASE_API_KEY: ${{ secrets.REACT_APP_FIREBASE_API_KEY }}
           VITE_FIREBASE_PROJECT_ID: ${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.REACT_APP_FIREBASE_APP_ID }}
 
-      - id: 'auth'
-        name: 'Authenticate to Google Cloud'
-        uses: 'google-github-actions/auth@v2'
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
         with:
-          credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
-          project_id: '${{ env.PROJECT_ID }}'
-
-      - name: Deploy to Cloud Run
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: ${{ env.SERVICE_NAME }}
-          region: ${{ env.REGION }}
-          source: ./
-          env_vars: |
-            NODE_ENV=production
-            GEMINI_API_KEY=${{ secrets.REACT_APP_GEMINI_API_KEY }}
-            FIREBASE_API_KEY=${{ secrets.REACT_APP_FIREBASE_API_KEY }}
-            FIREBASE_PROJECT_ID=${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}
-            FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.GCP_CREDENTIALS }}'
+          projectId: gen-lang-client-0559469589
+          channelId: live

@@ -3,56 +3,117 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
 import { Card } from '../components/UI';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { OperationType, handleFirestoreError } from '../lib/firebase';
-import { format } from 'date-fns';
-import { Calendar, Download } from 'lucide-react';
+import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { Calendar, Download, Filter, X } from 'lucide-react';
 import { LoopScore } from '../types';
 
 export function HistoryScreen() {
   const { user } = useFirebase();
   const [scores, setScores] = useState<LoopScore[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Date range state - Default to last 30 days
+  const [startDate, setStartDate] = useState<string>(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  const fetchScores = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const path = 'loopScores';
+    try {
+      let q = query(
+        collection(db, path),
+        where('userId', '==', user.uid),
+        orderBy('date', 'desc'),
+        limit(50)
+      );
+
+      // If dates are provided, we filter. Note: This might require a composite index 
+      // in a real production app, but for this dev environment we'll handle partial filtering
+      const snap = await getDocs(q);
+      let results = snap.docs.map(doc => doc.data() as LoopScore);
+      
+      // Client-side filtering for precise ranges to avoid index requirement overhead during dev
+      if (startDate && endDate) {
+        const start = startOfDay(new Date(startDate)).getTime();
+        const end = endOfDay(new Date(endDate)).getTime();
+        results = results.filter(s => {
+          const d = new Date(s.date).getTime();
+          return d >= start && d <= end;
+        });
+      }
+      
+      setScores(results);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, path);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, startDate, endDate]);
 
   useEffect(() => {
-    const fetchScores = async () => {
-      if (!user) return;
-      setLoading(true);
-      const path = 'loopScores';
-      try {
-        const q = query(
-          collection(db, path),
-          where('userId', '==', user.uid),
-          orderBy('date', 'desc'),
-          limit(30)
-        );
-        const snap = await getDocs(q);
-        setScores(snap.docs.map(doc => doc.data() as LoopScore));
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, path);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchScores();
-  }, [user]);
+  }, [fetchScores]);
 
   return (
     <Layout>
-      <header className="mb-8 flex justify-between items-end">
+      <header className="mb-6 flex justify-between items-end">
         <div>
            <h1 className="text-[28px] font-black leading-tight">Your History</h1>
            <p className="text-slate font-medium">Looking back to move forward.</p>
         </div>
-        <button className="w-10 h-10 rounded-full bg-off-white flex items-center justify-center text-slate">
-           <Download size={20} />
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setIsFilterOpen(!isFilterOpen)}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isFilterOpen ? 'bg-navy text-white' : 'bg-off-white text-slate'}`}
+          >
+             <Filter size={18} />
+          </button>
+          <button className="w-10 h-10 rounded-full bg-off-white flex items-center justify-center text-slate">
+             <Download size={18} />
+          </button>
+        </div>
       </header>
+
+      {/* Date Range Picker UI */}
+      {isFilterOpen && (
+        <div className="mb-6 bg-off-white/50 p-5 rounded-card border border-off-white animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-[11px] font-black uppercase tracking-widest text-slate">Filter by Date Range</span>
+            <button onClick={() => setIsFilterOpen(false)} className="text-slate/40 hover:text-navy">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-[9px] font-black text-slate/40 uppercase block mb-1">From</label>
+              <input 
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full bg-white rounded-xl px-3 py-2 text-sm font-bold border-2 border-transparent focus:border-navy transition-all outline-none"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-[9px] font-black text-slate/40 uppercase block mb-1">To</label>
+              <input 
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full bg-white rounded-xl px-3 py-2 text-sm font-bold border-2 border-transparent focus:border-navy transition-all outline-none"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col gap-4 pb-20">
         {loading ? (
