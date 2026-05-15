@@ -81,6 +81,7 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(userId) && isValidUser(incoming());
       allow update: if isOwner(userId) && isValidUser(incoming())
                        && incoming().uid == existing().uid;
+      allow delete: if isOwner(userId);
     }
 
     match /sleepLogs/{logId} {
@@ -121,6 +122,7 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(scoreId) && isValidLoopScore(incoming());
       allow update: if isSignedIn() && isOwner(existing().userId) && isValidLoopScore(incoming())
                        && incoming().userId == existing().userId;
+      allow delete: if isOwner(existing().userId);
     }
 
     match /nutritionNudges/{nudgeId} {
@@ -128,6 +130,7 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(nudgeId) && isValidNutritionNudge(incoming());
       allow update: if isSignedIn() && isOwner(existing().userId) && isValidNutritionNudge(incoming())
                        && incoming().userId == existing().userId;
+      allow delete: if isOwner(existing().userId);
     }
 
     match /weeklyInsights/{insightId} {
@@ -135,6 +138,7 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(insightId) && isValidWeeklyInsight(incoming());
       allow update: if isSignedIn() && isOwner(existing().userId) && isValidWeeklyInsight(incoming())
                        && incoming().userId == existing().userId;
+      allow delete: if isOwner(existing().userId);
     }
   }
 }

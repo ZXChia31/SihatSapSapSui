@@ -15,6 +15,7 @@ import { format } from 'date-fns';
 import { Moon, Plus, TrendingUp, Smile, Frown, Meh, Trash2, Edit3, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SleepLog } from '../types';
+import { TimePicker } from '../components/TimePicker';
 
 export function SleepScreen() {
   const { user } = useFirebase();
@@ -235,23 +236,19 @@ export function SleepScreen() {
                   />
                 </div>
 
-                <div className="flex gap-3">
-                  <div className="flex-1 flex flex-col gap-2">
-                    <label className="text-[11px] font-black tracking-widest text-slate uppercase">Bedtime</label>
-                    <input 
-                      type="time" 
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-black tracking-widest text-slate uppercase px-1">Bedtime</label>
+                    <TimePicker 
                       value={bedtime}
-                      onChange={(e) => setBedtime(e.target.value)}
-                      className="h-14 bg-off-white border-2 border-transparent focus:border-amber focus:bg-white rounded-2xl px-5 font-bold transition-all outline-none"
+                      onChange={setBedtime}
                     />
                   </div>
-                  <div className="flex-1 flex flex-col gap-2">
-                    <label className="text-[11px] font-black tracking-widest text-slate uppercase">Wake Up</label>
-                    <input 
-                      type="time" 
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-black tracking-widest text-slate uppercase px-1">Wake Up</label>
+                    <TimePicker 
                       value={wakeTime}
-                      onChange={(e) => setWakeTime(e.target.value)}
-                      className="h-14 bg-off-white border-2 border-transparent focus:border-amber focus:bg-white rounded-2xl px-5 font-bold transition-all outline-none"
+                      onChange={setWakeTime}
                     />
                   </div>
                 </div>

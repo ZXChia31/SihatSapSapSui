@@ -256,7 +256,32 @@ export function ProfileScreen() {
                        <p className="text-slate font-medium">Control your privacy and data exports.</p>
                        <button className="w-full text-left p-4 rounded-2xl bg-off-white font-bold text-navy">Export Health Data (JSON)</button>
                        <button className="w-full text-left p-4 rounded-2xl bg-off-white font-bold text-navy">Download Privacy Summary</button>
-                       <button className="w-full text-left p-4 rounded-2xl border-2 border-red-500 text-red-500 font-black">DELETE ACCOUNT</button>
+                       <div className="pt-4 mt-2 border-t border-off-white">
+                         <p className="text-[11px] text-slate-400 mb-4 px-1 uppercase font-black tracking-widest">Danger Zone</p>
+                         <button 
+                           onClick={async () => {
+                             if (!window.confirm("Are you ABSOLUTELY sure? All your progress, loops, and scores will be lost forever.")) return;
+                             if (!window.confirm("Final verification: This will delete all your data and sign you out permanently. Proceed?")) return;
+                             
+                             try {
+                               const { deleteUserAccount } = await import('../lib/firebase');
+                               await deleteUserAccount();
+                               window.alert("Account and data deleted successfully.");
+                               window.location.reload();
+                             } catch (err) {
+                               const error = err as Error;
+                               if (error.message === "REAUTH_REQUIRED") {
+                                 window.alert("For security, please sign out and sign back in before deleting your account.");
+                               } else {
+                                 window.alert("Failed to delete account. Please try again later.");
+                               }
+                             }
+                           }}
+                           className="w-full text-left p-4 rounded-2xl border-2 border-red-500 text-red-500 font-black hover:bg-red-50 transition-colors"
+                         >
+                           DELETE ACCOUNT PERMANENTLY
+                         </button>
+                       </div>
                     </div>
                   )}
 
