@@ -14,10 +14,11 @@ import { Goal, Moon, Utensils, Zap, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { generateNutritionNudge } from '../services/geminiService';
-import { setDoc, doc, getDoc, getDocs } from 'firebase/firestore';
+import ReactMarkdown from 'react-markdown';
+import { generateNutritionNudge, generateWeeklyInsight } from '../services/geminiService';
+import { setDoc, doc, getDoc } from 'firebase/firestore';
 import { OperationType, handleFirestoreError } from '../lib/firebase';
-import { MealLog, ActivityLog } from '../types';
+import { MealLog, ActivityLog, SleepLog } from '../types';
 
 export function DashboardScreen() {
   const { profile, user } = useFirebase();
@@ -30,6 +31,62 @@ export function DashboardScreen() {
     total: 0 
   });
   const [nudge, setNudge] = useState<string | null>(null);
+  const [weeklyInsight, setWeeklyInsight] = useState<string | null>(null);
+
+  const fetchWeeklyInsight = useCallback(async () => {
+    if (!user || !profile) return;
+    
+    // Get start of the week (last Sunday)
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const diff = today.getDate() - dayOfWeek;
+    const sunday = new Date(today.setDate(diff));
+    const sundayStr = format(sunday, 'yyyy-MM-dd');
+    
+    const insightPath = `weeklyInsights/${user.uid}_${sundayStr}`;
+    const insightRef = doc(db, insightPath);
+    
+    try {
+      const snap = await getDoc(insightRef);
+      if (snap.exists()) {
+        setWeeklyInsight(snap.data().insightText);
+      } else if (dayOfWeek === 0) { // Only generate on Sunday if missing
+        // Fetch last 7 days of data
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const sevenDaysAgoStr = format(sevenDaysAgo, 'yyyy-MM-dd');
+
+        const fetchLogs = async (collectionName: string) => {
+          const q = query(
+            collection(db, collectionName),
+            where('userId', '==', user.uid),
+            where('date', '>=', sevenDaysAgoStr)
+          );
+          const snap = await getDocs(q);
+          return snap.docs.map(d => d.data());
+        };
+
+        const [sleep, meals, move] = await Promise.all([
+          fetchLogs('sleepLogs') as Promise<SleepLog[]>,
+          fetchLogs('mealLogs') as Promise<MealLog[]>,
+          fetchLogs('activityLogs') as Promise<ActivityLog[]>
+        ]);
+
+        const insightText = await generateWeeklyInsight(profile, sleep, meals, move);
+        
+        await setDoc(insightRef, {
+          userId: user.uid,
+          weekStartDate: sundayStr,
+          insightText,
+          generatedAt: new Date().toISOString()
+        });
+        
+        setWeeklyInsight(insightText);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch weekly insight:', err);
+    }
+  }, [user, profile]);
 
   const fetchNudge = useCallback(async () => {
     if (!user || !profile) return;
@@ -193,7 +250,10 @@ export function DashboardScreen() {
     let isMounted = true;
     const fetchAll = async () => {
       try {
-        await fetchNudge();
+        await Promise.all([
+          fetchNudge(),
+          fetchWeeklyInsight()
+        ]);
         if (isMounted) {
           await fetchScores();
         }
@@ -203,7 +263,7 @@ export function DashboardScreen() {
     };
     fetchAll();
     return () => { isMounted = false; };
-  }, [fetchNudge, fetchScores, location.key]);
+  }, [fetchNudge, fetchWeeklyInsight, fetchScores, location.key]);
 
   const data = [
     { name: 'Completed', value: todayScore.total },
@@ -297,6 +357,26 @@ export function DashboardScreen() {
           </Card>
         </button>
       </div>
+
+      {/* Weekly Insight */}
+      {weeklyInsight && (
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-white rounded-card p-8 border border-slate/5 mb-8 shadow-lifted relative overflow-hidden"
+        >
+          <div className="absolute top-0 right-0 p-4 opacity-5 rotate-12">
+            <Goal size={120} />
+          </div>
+          <h1 className="text-navy font-black text-2xl mb-6 flex items-center gap-3">
+             <Sparkles className="text-amber" size={24} />
+             Weekly Loop Insight
+          </h1>
+          <div className="prose prose-slate max-w-none text-slate font-medium space-y-4">
+             <ReactMarkdown>{weeklyInsight}</ReactMarkdown>
+          </div>
+        </motion.div>
+      )}
 
       {/* AI Nudge */}
       {nudge && (

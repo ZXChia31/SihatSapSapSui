@@ -5,7 +5,7 @@
 
 import { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Moon, Utensils, Zap, History, User } from 'lucide-react';
+import { Home, Moon, Utensils, Zap, History, User, CloudOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -18,7 +18,7 @@ interface LayoutProps {
 
 export function Layout({ children, userPhoto: propUserPhoto }: LayoutProps) {
   const location = useLocation();
-  const { profile } = useFirebase();
+  const { profile, isOnline } = useFirebase();
   const userPhoto = propUserPhoto || profile?.photoUrl;
 
   const tabs = [
@@ -31,6 +31,20 @@ export function Layout({ children, userPhoto: propUserPhoto }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-white max-w-[420px] mx-auto relative flex flex-col shadow-2xl">
+      <AnimatePresence>
+        {!isOnline && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-amber/90 backdrop-blur-sm text-navy text-[12px] font-bold py-1.5 px-4 flex items-center justify-center gap-2 z-50 sticky top-0"
+          >
+            <CloudOff size={14} />
+            <span>You're offline. Loops will sync when you're back.</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
       <main className="flex-1 pb-[100px] overflow-y-auto px-5 pt-8">
         <AnimatePresence mode="wait">
           <motion.div

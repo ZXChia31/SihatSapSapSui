@@ -13,6 +13,7 @@ interface FirebaseContextType {
   user: FirebaseUser | null;
   profile: User | null;
   loading: boolean;
+  isOnline: boolean;
   refreshProfile: () => Promise<void>;
 }
 
@@ -22,6 +23,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   const fetchProfile = async (uid: string) => {
     const path = `users/${uid}`;
@@ -41,6 +43,12 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
@@ -51,7 +59,11 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   const refreshProfile = async () => {
@@ -59,7 +71,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <FirebaseContext.Provider value={{ user, profile, loading, refreshProfile }}>
+    <FirebaseContext.Provider value={{ user, profile, loading, isOnline, refreshProfile }}>
       {children}
     </FirebaseContext.Provider>
   );

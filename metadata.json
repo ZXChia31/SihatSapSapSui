@@ -2,5 +2,5 @@
   "name": "SihatSapSapSui",
   "description": "A health-tracking app for monitoring sleep, nutrition, and physical activity with AI-powered insights.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
