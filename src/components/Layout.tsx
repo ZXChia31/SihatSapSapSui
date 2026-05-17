@@ -10,6 +10,7 @@ import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { useFirebase } from '../contexts/FirebaseContext';
+import { NotificationCenter } from './NotificationCenter';
 
 interface LayoutProps {
   children: ReactNode;
@@ -31,6 +32,7 @@ export function Layout({ children, userPhoto: propUserPhoto }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-white max-w-[420px] mx-auto relative flex flex-col shadow-2xl">
+      <NotificationCenter />
       <AnimatePresence>
         {!isOnline && (
           <motion.div 

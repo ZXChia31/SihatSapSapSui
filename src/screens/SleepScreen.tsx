@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { Layout } from '../components/Layout';
-import { Card, Button } from '../components/UI';
+import { Card, Button, ConfirmModal } from '../components/UI';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, addDoc, limit, updateDoc, deleteDoc, doc } from 'firebase/firestore';
@@ -15,14 +15,17 @@ import { format } from 'date-fns';
 import { Moon, Plus, TrendingUp, Smile, Frown, Meh, Trash2, Edit3, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SleepLog } from '../types';
+import { calculateSleepScore, calculateOverallScore } from '../lib/scoring';
 import { TimePicker } from '../components/TimePicker';
+import { AIPatterns } from '../components/AIPatterns';
 
 export function SleepScreen() {
-  const { user } = useFirebase();
+  const { user, profile } = useFirebase();
   const [logs, setLogs] = useState<SleepLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [showLogForm, setShowLogForm] = useState(false);
   const [editingLog, setEditingLog] = useState<SleepLog | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Form State
   const [bedtime, setBedtime] = useState('22:30');
@@ -62,6 +65,49 @@ export function SleepScreen() {
     return () => { isMounted = false; };
   }, [fetchLogs]);
 
+  const updateLoopScore = async (currentDate: string, sleepLog: SleepLog | null) => {
+    if (!user || !profile) return;
+    try {
+      const scoreId = `${user.uid}_${currentDate}`;
+      const scoreRef = doc(db, 'loopScores', scoreId);
+      const scoreSnap = await getDoc(scoreRef);
+      
+      const newSleepScore = sleepLog ? calculateSleepScore(sleepLog, profile) : 0;
+      
+      if (scoreSnap.exists()) {
+        const scoreData = scoreSnap.data();
+        const newOverall = calculateOverallScore({
+          sleepScore: newSleepScore,
+          eatScore: scoreData.eatScore || 0,
+          moveScore: scoreData.moveScore || 0
+        });
+        await updateDoc(scoreRef, {
+          sleepScore: Math.round(newSleepScore),
+          overallScore: Math.round(newOverall),
+          computedAt: new Date().toISOString()
+        });
+      } else {
+        // Create new score doc if it doesn't exist
+        const newOverall = calculateOverallScore({
+          sleepScore: newSleepScore,
+          eatScore: 0,
+          moveScore: 0
+        });
+        await setDoc(scoreRef, {
+          userId: user.uid,
+          date: currentDate,
+          sleepScore: Math.round(newSleepScore),
+          eatScore: 0,
+          moveScore: 0,
+          overallScore: Math.round(newOverall),
+          computedAt: new Date().toISOString()
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to update loop score after sleep change:', err);
+    }
+  };
+
   const calculateHours = (start: string, end: string) => {
     const [startH, startM] = start.split(':').map(Number);
     const [endH, endM] = end.split(':').map(Number);
@@ -92,6 +138,9 @@ export function SleepScreen() {
       } else {
         await addDoc(collection(db, path), logData);
       }
+      
+      await updateLoopScore(date, logData as SleepLog);
+      
       resetForm();
       fetchLogs();
     } catch (err) {
@@ -100,11 +149,15 @@ export function SleepScreen() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this sleep log?')) return;
+    const logToDelete = logs.find(l => l.id === id);
+    if (!logToDelete) return;
+
     const path = 'sleepLogs';
     try {
       await deleteDoc(doc(db, path, id));
-      fetchLogs();
+      setLogs(prev => prev.filter(log => log.id !== id));
+      
+      await updateLoopScore(logToDelete.date, null);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -152,17 +205,34 @@ export function SleepScreen() {
         </Button>
       </header>
 
+      <div className="mb-8">
+        <AIPatterns userId={user?.uid || ''} domain="Sleep" logs={logs} profile={profile} />
+      </div>
+
       <div className="grid grid-cols-1 gap-6">
         {/* Weekly Trend Card */}
-        <Card className="bg-amber/5 border-l-amber">
-          <div className="flex items-center gap-2 mb-4">
+        <Card className="bg-white border-none shadow-lifted p-6 rounded-[32px] overflow-hidden relative group">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-amber/5 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform duration-700" />
+          <div className="flex items-center gap-2 mb-6 relative z-10">
             <TrendingUp size={18} className="text-amber" />
-            <h3 className="font-bold text-navy">Weekly Consistency</h3>
+            <h3 className="text-[11px] font-black text-amber uppercase tracking-[0.2em]">Weekly Consistency</h3>
           </div>
-          <div className="text-[32px] font-black text-navy leading-none mb-1">
-            {logs.length > 0 ? (logs.reduce((acc, l) => acc + l.hoursSlept, 0) / logs.length).toFixed(1) : '0'}h
+          <div className="flex items-end gap-2 mb-2 relative z-10">
+            <span className="text-[48px] font-black text-navy leading-none">
+              {logs.length > 0 ? (logs.reduce((acc, l) => acc + l.hoursSlept, 0) / logs.length).toFixed(1) : '0'}
+            </span>
+            <span className="text-lg font-black text-slate/40 mb-1.5 uppercase">hrs/night</span>
           </div>
-          <p className="text-slate text-sm font-medium">Average sleep duration</p>
+          <div className="w-full h-2 bg-off-white rounded-full overflow-hidden relative z-10">
+            <motion.div 
+               initial={{ width: 0 }}
+               animate={{ width: `${Math.min(100, (logs.reduce((acc, l) => acc + l.hoursSlept, 0) / (logs.length || 1)) / (profile?.sleepTarget || 8) * 100)}%` }}
+               className="h-full bg-amber shadow-[0_0_12px_rgba(255,193,7,0.3)]"
+            />
+          </div>
+          <p className="text-[10px] font-bold text-slate uppercase tracking-widest mt-4 opacity-60 relative z-10">
+            {logs.length > 0 ? 'Tracking steady rhythm' : 'Start logging to see trends'}
+          </p>
         </Card>
 
         {/* Logs List */}
@@ -183,27 +253,54 @@ export function SleepScreen() {
             </div>
           ) : (
             logs.map((log) => (
-              <Card key={log.id} className="flex items-center justify-between py-3 px-4 h-auto min-h-[72px] group">
-                <div className="flex flex-col">
-                  <span className="font-bold text-navy text-[15px]">{format(new Date(log.date), 'EEE, MMM d')}</span>
-                  <span className="text-slate text-[13px] font-medium">{log.bedtime} - {log.wakeTime}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => handleEdit(log)} className="p-2 text-slate hover:text-navy"><Edit3 size={18} /></button>
-                      <button onClick={() => handleDelete(log.id!)} className="p-2 text-slate hover:text-red-500"><Trash2 size={18} /></button>
-                   </div>
-                  <div className="text-right">
-                    <span className="block font-black text-navy text-[17px] leading-tight">{log.hoursSlept.toFixed(1)}h</span>
-                    <span className="text-[11px] font-bold text-slate uppercase">Slept</span>
+              <Card key={log.id} className="flex items-center justify-between p-5 border-none shadow-sm hover:shadow-md transition-all active:scale-[0.99] group overflow-hidden relative">
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber/20 group-hover:bg-amber transition-colors" />
+                <div className="flex flex-col gap-1">
+                  <span className="font-black text-navy text-[16px] tracking-tight">{format(new Date(log.date), 'EEEE, MMM d')}</span>
+                  <div className="flex items-center gap-2 text-slate text-xs font-bold uppercase tracking-wider opacity-60">
+                    <Moon size={12} />
+                    {log.bedtime} - {log.wakeTime}
                   </div>
-                  {getMoodIcon(log.moodRating)}
+                </div>
+                
+                <div className="flex items-center gap-6">
+                  <div className="text-right">
+                    <div className="flex items-baseline gap-0.5 justify-end">
+                      <span className="font-black text-navy text-2xl leading-none">{log.hoursSlept.toFixed(1)}</span>
+                      <span className="text-[10px] font-black text-slate/40 uppercase">h</span>
+                    </div>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-off-white flex items-center justify-center group-hover:bg-amber/10 transition-colors">
+                    {getMoodIcon(log.moodRating)}
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={(e) => {  e.stopPropagation(); handleEdit(log); }} 
+                      className="p-2 text-slate hover:text-navy"
+                    >
+                      <Edit3 size={16} />
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(log.id!); }} 
+                      className="p-2 text-slate hover:text-red-500"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
               </Card>
             ))
           )}
         </div>
       </div>
+
+      <ConfirmModal 
+        isOpen={!!confirmDeleteId}
+        onClose={() => setConfirmDeleteId(null)}
+        onConfirm={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+        title="Delete Sleep Log"
+        message="Are you sure you want to remove this sleep record? This will affect your Loop score for that day."
+      />
 
       {/* Log Form Overlay */}
       <AnimatePresence>
@@ -212,17 +309,19 @@ export function SleepScreen() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-navy/60 z-50 flex items-end justify-center p-0 sm:p-5 backdrop-blur-sm"
+            onClick={resetForm}
+            className="fixed inset-0 bg-navy/60 z-50 flex items-end justify-center p-0 sm:p-5 backdrop-blur-sm cursor-pointer"
           >
             <motion.div 
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="bg-white w-full rounded-t-[32px] sm:rounded-[24px] p-8 pb-10 max-w-[420px]"
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white w-full rounded-t-[32px] sm:rounded-[24px] p-8 pb-10 max-w-[420px] max-h-[95vh] overflow-y-auto cursor-default"
             >
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-black text-amber">{editingLog ? 'Edit Night' : 'Record Night'}</h2>
-                <button onClick={resetForm} className="text-slate"><X /></button>
+                <button onClick={resetForm} className="text-slate p-1 hover:bg-off-white rounded-full transition-colors"><X size={24} /></button>
               </div>
 
               <form onSubmit={handleSave} className="flex flex-col gap-5">
@@ -276,9 +375,12 @@ export function SleepScreen() {
                   </div>
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-6 flex flex-col gap-3">
                   <Button type="submit" domain="sleep">
                     {editingLog ? 'Update Night' : 'Log Night'}
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={resetForm}>
+                    Cancel
                   </Button>
                 </div>
               </form>

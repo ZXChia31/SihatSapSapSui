@@ -12,19 +12,21 @@ import { SleepScreen } from './screens/SleepScreen';
 import { EatScreen } from './screens/EatScreen';
 import { MoveScreen } from './screens/MoveScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
+import { WorkoutsScreen } from './screens/WorkoutsScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
+import { FAQScreen } from './screens/FAQScreen';
+import { AnalysisDetailScreen } from './screens/AnalysisDetailScreen';
+import { YourHabitsScreen } from './screens/YourHabitsScreen';
 import { signIn } from './lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
-import { db, OperationType, handleFirestoreError } from './lib/firebase';
-import { User } from './types';
 
 function AppRoutes() {
-  const { user, profile, loading, refreshProfile } = useFirebase();
+  const { user, profile, loading } = useFirebase();
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-navy border-t-yellow rounded-full animate-spin" />
+      <div className="min-h-screen bg-off-white flex flex-col items-center justify-center p-8 text-center text-navy">
+        <div className="w-16 h-16 border-4 border-teal border-t-transparent rounded-full animate-spin mb-6" />
+        <h2 className="text-xl font-black animate-pulse uppercase tracking-widest text-[11px]">Syncing loops...</h2>
       </div>
     );
   }
@@ -34,31 +36,12 @@ function AppRoutes() {
   }
 
   if (!profile || !profile.onboardingComplete) {
-    const handleComplete = async (onboardingData: Partial<User>) => {
-      if (!user) return;
-      const userPath = `users/${user.uid}`;
-      const userRef = doc(db, userPath);
-      const newUser: User = {
-        uid: user.uid,
-        displayName: onboardingData.displayName || user.displayName || 'Guest',
-        email: user.email || '',
-        photoUrl: user.photoURL || '',
-        sleepTargetBedtime: onboardingData.sleepTargetBedtime || '22:30',
-        sleepTargetWakeTime: onboardingData.sleepTargetWakeTime || '06:30',
-        sleepTargetHours: onboardingData.sleepTargetHours || 8,
-        weeklyActivityTarget: onboardingData.weeklyActivityTarget || 3,
-        createdAt: new Date().toISOString(),
-        onboardingComplete: true
-      };
-      try {
-        await setDoc(userRef, newUser);
-        await refreshProfile();
-      } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, userPath);
-      }
-    };
-
-    return <OnboardingScreen onComplete={handleComplete} />;
+    return (
+      <Routes>
+        <Route path="/onboarding" element={<OnboardingScreen />} />
+        <Route path="*" element={<Navigate to="/onboarding" />} />
+      </Routes>
+    );
   }
 
   return (
@@ -67,8 +50,13 @@ function AppRoutes() {
       <Route path="/sleep" element={<SleepScreen />} />
       <Route path="/eat" element={<EatScreen />} />
       <Route path="/move" element={<MoveScreen />} />
+      <Route path="/workouts" element={<WorkoutsScreen />} />
       <Route path="/history" element={<HistoryScreen />} />
       <Route path="/profile" element={<ProfileScreen />} />
+      <Route path="/habits" element={<YourHabitsScreen />} />
+      <Route path="/faq" element={<FAQScreen />} />
+      <Route path="/analysis/:domain" element={<AnalysisDetailScreen />} />
+      <Route path="/onboarding" element={<OnboardingScreen />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );

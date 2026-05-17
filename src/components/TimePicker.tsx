@@ -46,9 +46,17 @@ export function TimePicker({ value, onChange }: TimePickerProps) {
         >
           <ChevronUp size={24} />
         </button>
-        <div className="text-4xl font-black text-navy w-16 text-center tabular-nums">
-          {String(hours).padStart(2, '0')}
-        </div>
+        <input 
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={String(hours).padStart(2, '0')}
+          onChange={(e) => {
+            const val = parseInt(e.target.value.replace(/\D/g, '').slice(-2));
+            if (!isNaN(val)) adjustHour(val - hours);
+          }}
+          className="text-4xl font-black text-navy w-16 bg-transparent text-center tabular-nums outline-none focus:text-amber transition-colors"
+        />
         <button 
           type="button"
           onClick={() => adjustHour(-1)}
@@ -69,9 +77,17 @@ export function TimePicker({ value, onChange }: TimePickerProps) {
         >
           <ChevronUp size={24} />
         </button>
-        <div className="text-4xl font-black text-navy w-16 text-center tabular-nums">
-          {String(minutes).padStart(2, '0')}
-        </div>
+        <input 
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={String(minutes).padStart(2, '0')}
+          onChange={(e) => {
+            const val = parseInt(e.target.value.replace(/\D/g, '').slice(-2));
+            if (!isNaN(val)) adjustMinute(val - minutes);
+          }}
+          className="text-4xl font-black text-navy w-16 bg-transparent text-center tabular-nums outline-none focus:text-amber transition-colors"
+        />
         <button 
           type="button"
           onClick={() => adjustMinute(-5)}

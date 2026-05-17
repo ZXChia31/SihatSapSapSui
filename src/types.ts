@@ -16,10 +16,45 @@ export interface User {
   sleepTargetBedtime: string; // HH:MM
   sleepTargetWakeTime: string; // HH:MM
   sleepTargetHours: number;
-  weeklyActivityTarget: number; // 1+
-  dailyHealthyMealTarget: number; // 1-5
+  weeklyActivityTarget: number; // sessions per week
+  weeklyActivityDurationTarget?: number; // minutes per week
+  dailyHealthyMealTarget: number; // 1-5 sessions
+  nutritionTargets?: {
+    protein: number; // grams per day
+    fat: number; // grams per day
+    fiber: number; // grams per day
+  };
+  aiFocusPreferences?: string[];
+  aiUsage?: {
+    dailyRequests: number;
+    lastResetDate: string; // YYYY-MM-DD
+    totalRequests: number;
+    balance?: number;
+  };
+  streaks?: {
+    sleep: number;
+    eat: number;
+    move: number;
+    overall: number;
+  };
   createdAt: string; // ISO
   onboardingComplete: boolean;
+  age?: number;
+  weight?: number; // kg
+  height?: number; // cm
+  bmi?: number;
+  habits?: {
+    sleep: string;
+    eat: string;
+    move: string;
+  };
+  gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say';
+  settings?: {
+    pushNotifications: boolean;
+    activityReminders: boolean;
+    sleepAlerts: boolean;
+    aiInsights: boolean;
+  };
 }
 
 export interface SleepLog {
@@ -39,9 +74,9 @@ export interface MealLog {
   date: string;
   mealName: string;
   mealSlot: MealSlot;
-  proteinRating: number;
-  fatRating: number;
-  fibreRating: number;
+  proteinGrams?: number;
+  fatGrams?: number;
+  fiberGrams?: number;
   overallHealthRating: number;
   loggedAt: string;
 }

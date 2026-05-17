@@ -9,11 +9,23 @@
         "displayName": { "type": "string" },
         "email": { "type": "string" },
         "photoUrl": { "type": "string" },
+        "age": { "type": "integer" },
+        "gender": { "type": "string" },
+        "weight": { "type": "number" },
+        "height": { "type": "number" },
+        "bmi": { "type": "number" },
+        "habits": { "type": "object" },
         "sleepTargetBedtime": { "type": "string", "description": "HH:MM format" },
         "sleepTargetWakeTime": { "type": "string", "description": "HH:MM format" },
         "sleepTargetHours": { "type": "number" },
         "weeklyActivityTarget": { "type": "integer" },
+        "weeklyActivityDurationTarget": { "type": "integer" },
         "dailyHealthyMealTarget": { "type": "integer" },
+        "nutritionTargets": { "type": "object" },
+        "aiFocusPreferences": { "type": "array", "items": { "type": "string" } },
+        "aiUsage": { "type": "object" },
+        "streaks": { "type": "object" },
+        "settings": { "type": "object" },
         "onboardingComplete": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
@@ -33,7 +45,7 @@
         "moodRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
         "loggedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "date", "bedtime", "wakeTime", "hoursSlept", "moodRating"]
+      "required": ["userId", "date", "bedtime", "wakeTime", "hoursSlept", "moodRating", "loggedAt"]
     },
     "MealLog": {
       "title": "Meal Log",
@@ -45,13 +57,13 @@
         "date": { "type": "string", "format": "date" },
         "mealName": { "type": "string" },
         "mealSlot": { "type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"] },
-        "proteinRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
-        "fatRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
-        "fibreRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+        "proteinGrams": { "type": "integer" },
+        "fatGrams": { "type": "integer" },
+        "fiberGrams": { "type": "integer" },
         "overallHealthRating": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
         "loggedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "date", "mealName", "mealSlot"]
+      "required": ["userId", "date", "mealName", "mealSlot", "overallHealthRating", "loggedAt"]
     },
     "ActivityLog": {
       "title": "Activity Log",
@@ -101,18 +113,19 @@
       },
       "required": ["userId", "date", "sleepScore", "eatScore", "moveScore", "overallScore"]
     },
-    "NutritionNudge": {
-      "title": "Nutrition Nudge",
-      "description": "AI-generated meal advice",
+    "DailyInsight": {
+      "title": "Daily Loop Insight",
+      "description": "AI-generated daily health insight",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
         "date": { "type": "string", "format": "date" },
-        "nudgeText": { "type": "string" },
+        "insightText": { "type": "string" },
+        "fingerprint": { "type": "string" },
         "generatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "date", "nudgeText"]
+      "required": ["userId", "date", "insightText", "fingerprint"]
     },
     "WeeklyInsight": {
       "title": "Weekly Insight",
@@ -153,9 +166,9 @@
       "schema": "LoopScore",
       "description": "Daily loop scores"
     },
-    "nutritionNudges/{nudgeId}": {
-      "schema": "NutritionNudge",
-      "description": "Daily nutrition nudges"
+    "dailyInsights/{insightId}": {
+      "schema": "DailyInsight",
+      "description": "Daily loop insights"
     },
     "weeklyInsights/{insightId}": {
       "schema": "WeeklyInsight",

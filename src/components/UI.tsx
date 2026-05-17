@@ -10,9 +10,10 @@ interface CardProps {
   children: ReactNode;
   className?: string;
   domain?: 'sleep' | 'eat' | 'move' | 'none';
+  onClick?: (e: React.MouseEvent) => void;
 }
 
-export function Card({ children, className, domain = 'none' }: CardProps) {
+export function Card({ children, className, domain = 'none', onClick }: CardProps) {
   const domainColors = {
     sleep: 'border-l-amber bg-amber/5',
     eat: 'border-l-teal bg-teal/5',
@@ -21,11 +22,15 @@ export function Card({ children, className, domain = 'none' }: CardProps) {
   };
 
   return (
-    <div className={cn(
-      "bg-white rounded-card shadow-ambient border-l-[5px] p-4 transition-all duration-300",
-      domainColors[domain],
-      className
-    )}>
+    <div 
+      onClick={onClick}
+      className={cn(
+        "bg-white rounded-card shadow-ambient border-l-[5px] p-4 transition-all duration-300",
+        domainColors[domain],
+        onClick && "cursor-pointer active:scale-[0.98]",
+        className
+      )}
+    >
       {children}
     </div>
   );
@@ -81,5 +86,32 @@ export function Button({
     <button className={finalStyle} {...props}>
       {children}
     </button>
+  );
+}
+
+interface ConfirmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+}
+
+export function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: ConfirmModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-navy/60 backdrop-blur-sm z-[100] flex items-center justify-center p-5">
+      <div className="bg-white w-full max-w-[340px] rounded-[24px] p-6 shadow-2xl flex flex-col gap-6 font-sans">
+        <div className="text-center">
+          <h3 className="text-xl font-black text-navy mb-2">{title}</h3>
+          <p className="text-slate font-medium text-sm leading-relaxed">{message}</p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="ghost" onClick={onClose} className="h-12 text-sm">Cancel</Button>
+          <Button variant="destructive" onClick={() => { onConfirm(); onClose(); }} className="h-12 text-sm">Delete</Button>
+        </div>
+      </div>
+    </div>
   );
 }

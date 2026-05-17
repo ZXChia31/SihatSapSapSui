@@ -24,32 +24,48 @@ service cloud.firestore {
         && (data.sleepTargetHours is number && data.sleepTargetHours >= 0 && data.sleepTargetHours <= 24)
         && (data.weeklyActivityTarget is int && data.weeklyActivityTarget >= 1)
         && (data.dailyHealthyMealTarget is int && data.dailyHealthyMealTarget >= 1 && data.dailyHealthyMealTarget <= 5)
-        && (data.createdAt is string || data.createdAt is timestamp);
+        && (data.createdAt is string || data.createdAt is timestamp)
+        && (!('age' in data) || data.age is int)
+        && (!('weight' in data) || data.weight is number)
+        && (!('height' in data) || data.height is number)
+        && (!('gender' in data) || data.gender is string)
+        && (!('habits' in data) || data.habits is map)
+        && (!('nutritionTargets' in data) || data.nutritionTargets is map)
+        && (!('settings' in data) || data.settings is map)
+        && (!('aiUsage' in data) || data.aiUsage is map)
+        && (!('streaks' in data) || data.streaks is map);
     }
 
     function isValidSleepLog(data) {
       return data.userId == request.auth.uid
         && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.bedtime is string && data.bedtime.size() <= 8
+        && data.wakeTime is string && data.wakeTime.size() <= 8
         && data.hoursSlept is number && data.hoursSlept >= 0 && data.hoursSlept <= 24
-        && data.moodRating is int && data.moodRating >= 1 && data.moodRating <= 5;
+        && data.moodRating is int && data.moodRating >= 1 && data.moodRating <= 5
+        && data.loggedAt is string;
     }
 
     function isValidMealLog(data) {
       return data.userId == request.auth.uid
         && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.mealName is string && data.mealName.size() <= 200
         && data.mealSlot in ['breakfast', 'lunch', 'dinner', 'snack']
-        && data.proteinRating is int && data.proteinRating >= 1 && data.proteinRating <= 5
-        && data.fatRating is int && data.fatRating >= 1 && data.fatRating <= 5
-        && data.fibreRating is int && data.fibreRating >= 1 && data.fibreRating <= 5
-        && data.overallHealthRating is int && data.overallHealthRating >= 1 && data.overallHealthRating <= 5;
+        && (!('proteinGrams' in data) || (data.proteinGrams is int && data.proteinGrams >= 0 && data.proteinGrams <= 500))
+        && (!('fatGrams' in data) || (data.fatGrams is int && data.fatGrams >= 0 && data.fatGrams <= 500))
+        && (!('fiberGrams' in data) || (data.fiberGrams is int && data.fiberGrams >= 0 && data.fiberGrams <= 500))
+        && data.overallHealthRating is int && data.overallHealthRating >= 1 && data.overallHealthRating <= 5
+        && data.loggedAt is string;
     }
 
     function isValidActivityLog(data) {
       return data.userId == request.auth.uid
         && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.activityName is string && data.activityName.size() <= 200
         && data.activityType in ['self_logged', 'guided']
         && data.durationMinutes is int && data.durationMinutes > 0 && data.durationMinutes <= 300
-        && data.intensity in ['light', 'moderate', 'hard'];
+        && data.intensity in ['light', 'moderate', 'hard']
+        && data.completedAt is string;
     }
 
     function isValidLoopScore(data) {
@@ -72,6 +88,13 @@ service cloud.firestore {
       return data.userId == request.auth.uid
         && data.weekStartDate.matches('^\\d{4}-\\d{2}-\\d{2}$')
         && data.insightText is string && data.insightText.size() > 0;
+    }
+
+    function isValidDailyInsight(data) {
+      return data.userId == request.auth.uid
+        && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.insightText is string && data.insightText.size() > 0
+        && data.fingerprint is string;
     }
 
     // --- Collections ---
@@ -121,6 +144,14 @@ service cloud.firestore {
       allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if isSignedIn() && isValidId(scoreId) && isValidLoopScore(incoming());
       allow update: if isSignedIn() && isOwner(existing().userId) && isValidLoopScore(incoming())
+                       && incoming().userId == existing().userId;
+      allow delete: if isOwner(existing().userId);
+    }
+
+    match /dailyInsights/{insightId} {
+      allow read: if isSignedIn() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isSignedIn() && isValidId(insightId) && isValidDailyInsight(incoming());
+      allow update: if isSignedIn() && isOwner(existing().userId) && isValidDailyInsight(incoming())
                        && incoming().userId == existing().userId;
       allow delete: if isOwner(existing().userId);
     }

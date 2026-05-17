@@ -5,19 +5,20 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
-import { Card } from '../components/UI';
+import { Card, ConfirmModal } from '../components/UI';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit, deleteDoc, doc } from 'firebase/firestore';
 import { OperationType, handleFirestoreError } from '../lib/firebase';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
-import { Calendar, Download, Filter, X } from 'lucide-react';
+import { Calendar, Download, Filter, X, Trash2 } from 'lucide-react';
 import { LoopScore } from '../types';
 
 export function HistoryScreen() {
   const { user } = useFirebase();
   const [scores, setScores] = useState<LoopScore[]>([]);
   const [loading, setLoading] = useState(true);
+  const [confirmDeleteDate, setConfirmDeleteDate] = useState<string | null>(null);
   
   // Date range state - Default to last 30 days
   const [startDate, setStartDate] = useState<string>(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
@@ -29,19 +30,16 @@ export function HistoryScreen() {
     setLoading(true);
     const path = 'loopScores';
     try {
-      let q = query(
+      const q = query(
         collection(db, path),
         where('userId', '==', user.uid),
         orderBy('date', 'desc'),
         limit(50)
       );
 
-      // If dates are provided, we filter. Note: This might require a composite index 
-      // in a real production app, but for this dev environment we'll handle partial filtering
       const snap = await getDocs(q);
-      let results = snap.docs.map(doc => doc.data() as LoopScore);
+      let results = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LoopScore));
       
-      // Client-side filtering for precise ranges to avoid index requirement overhead during dev
       if (startDate && endDate) {
         const start = startOfDay(new Date(startDate)).getTime();
         const end = endOfDay(new Date(endDate)).getTime();
@@ -60,8 +58,64 @@ export function HistoryScreen() {
   }, [user, startDate, endDate]);
 
   useEffect(() => {
-    fetchScores();
+    let isMounted = true;
+    const load = async () => {
+      if (isMounted) {
+        await fetchScores();
+      }
+    };
+    load();
+    return () => { isMounted = false; };
   }, [fetchScores]);
+
+  const handleDeleteDay = async (date: string) => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const collections = ['loopScores', 'mealLogs', 'sleepLogs', 'activityLogs'];
+      for (const coll of collections) {
+        const q = query(
+          collection(db, coll),
+          where('userId', '==', user.uid),
+          where('date', '==', date)
+        );
+        const snap = await getDocs(q);
+        for (const d of snap.docs) {
+          await deleteDoc(doc(db, coll, d.id));
+        }
+      }
+      setScores(prev => prev.filter(s => s.date !== date));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'historyDay');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = () => {
+    if (scores.length === 0) return;
+    
+    const headers = ['Date', 'Sleep Score', 'Eat Score', 'Move Score', 'Overall Loop Score'];
+    const csvContent = [
+      headers.join(','),
+      ...scores.map(s => [
+        s.date,
+        s.sleepScore,
+        s.eatScore,
+        s.moveScore,
+        s.overallScore
+      ].join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `SihatLoop_History_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <Layout>
@@ -77,7 +131,11 @@ export function HistoryScreen() {
           >
              <Filter size={18} />
           </button>
-          <button className="w-10 h-10 rounded-full bg-off-white flex items-center justify-center text-slate">
+          <button 
+            onClick={handleDownload}
+            disabled={scores.length === 0}
+            className="w-10 h-10 rounded-full bg-off-white flex items-center justify-center text-slate hover:bg-navy hover:text-white transition-colors disabled:opacity-30 disabled:pointer-events-none"
+          >
              <Download size={18} />
           </button>
         </div>
@@ -126,22 +184,44 @@ export function HistoryScreen() {
           </div>
         ) : (
           scores.map((score, i) => (
-            <Card key={i} className="flex items-center justify-between py-4">
-               <div>
-                  <h4 className="font-bold text-navy">{format(new Date(score.date), 'EEEE, MMM d')}</h4>
+            <Card key={score.id || i} className="flex items-center justify-between py-4 group">
+               <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-navy">{format(new Date(score.date), 'EEEE, MMM d')}</h4>
+                    {score.date === format(new Date(), 'yyyy-MM-dd') && (
+                      <span className="text-[10px] font-bold bg-navy text-white px-2 py-0.5 rounded-full uppercase">Today</span>
+                    )}
+                  </div>
                   <div className="flex gap-3 mt-1">
-                     <span className="text-[11px] font-bold text-amber uppercase">Sleep: {score.sleepScore}%</span>
-                     <span className="text-[11px] font-bold text-teal uppercase">Eat: {score.eatScore}%</span>
-                     <span className="text-[11px] font-bold text-violet uppercase">Move: {score.moveScore}%</span>
+                     <span className="text-[11px] font-bold text-amber uppercase px-2 py-0.5 bg-amber/5 rounded-md">Sleep: {score.sleepScore.toFixed(2).replace(/\.00$/, '')}%</span>
+                     <span className="text-[11px] font-bold text-teal uppercase px-2 py-0.5 bg-teal/5 rounded-md">Eat: {score.eatScore.toFixed(2).replace(/\.00$/, '')}%</span>
+                     <span className="text-[11px] font-bold text-violet uppercase px-2 py-0.5 bg-violet/5 rounded-md">Move: {score.moveScore.toFixed(2).replace(/\.00$/, '')}%</span>
                   </div>
                </div>
-               <div className="flex flex-col items-center justify-center bg-yellow/10 w-14 h-14 rounded-xl border border-yellow/20">
-                  <span className="text-xl font-black text-navy">{score.overallScore}</span>
-                  <span className="text-[9px] font-black uppercase text-yellow-600">Loop</span>
+               <div className="flex items-center gap-4">
+                  <button 
+                    onClick={() => setConfirmDeleteDate(score.date)}
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-slate/60 hover:text-red-500 hover:bg-red-50 border border-transparent hover:border-red-100 transition-all group-hover:bg-off-white/50"
+                    title="Delete Day"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                  <div className="flex flex-col items-center justify-center bg-yellow/10 w-14 h-14 rounded-xl border border-yellow/20 shrink-0">
+                      <span className="text-xl font-black text-navy">{score.overallScore}</span>
+                      <span className="text-[9px] font-black uppercase text-yellow-600">Loop</span>
+                  </div>
                </div>
             </Card>
           ))
         )}
+
+        <ConfirmModal 
+          isOpen={!!confirmDeleteDate}
+          onClose={() => setConfirmDeleteDate(null)}
+          onConfirm={() => confirmDeleteDate && handleDeleteDay(confirmDeleteDate)}
+          title="Delete Daily Records?"
+          message={`This will permanently delete ALL logs (Meals, Sleep, and Activity) for ${confirmDeleteDate ? format(new Date(confirmDeleteDate), 'MMM d, yyyy') : ''}. This cannot be undone.`}
+        />
 
         {/* Mocking some sample history for design check if empty */}
         {scores.length === 0 && (

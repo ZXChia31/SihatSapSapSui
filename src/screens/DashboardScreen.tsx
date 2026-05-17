@@ -8,17 +8,25 @@ import { Layout } from '../components/Layout';
 import { Card } from '../components/UI';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { Goal, Moon, Utensils, Zap, Sparkles } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { useNavigate, useLocation } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
-import { generateNutritionNudge, generateWeeklyInsight } from '../services/geminiService';
+import { generateDailyInsight, generateWeeklyInsight } from '../services/geminiService';
 import { setDoc, doc, getDoc } from 'firebase/firestore';
 import { OperationType, handleFirestoreError } from '../lib/firebase';
 import { MealLog, ActivityLog, SleepLog } from '../types';
+import { cn } from '../lib/utils';
+import { 
+  calculateSleepScore, 
+  calculateEatScore, 
+  calculateMoveScore, 
+  calculateOverallScore,
+  calculateStreaks
+} from '../lib/scoring';
 
 export function DashboardScreen() {
   const { profile, user } = useFirebase();
@@ -30,11 +38,25 @@ export function DashboardScreen() {
     move: 0, moveSubtext: 'Loading...',
     total: 0 
   });
-  const [nudge, setNudge] = useState<string | null>(null);
+  const [streaks, setStreaks] = useState({ sleep: 0, eat: 0, move: 0, overall: 0 });
+  const [dailyInsight, setDailyInsight] = useState<string | null>(null);
   const [weeklyInsight, setWeeklyInsight] = useState<string | null>(null);
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
-  const fetchWeeklyInsight = useCallback(async () => {
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  const showFeedback = (msg: string) => {
+    setFeedback(msg);
+    setTimeout(() => setFeedback(null), 3000);
+  };
+
+  const fetchWeeklyInsight = useCallback(async (force = false) => {
     if (!user || !profile) return;
+    
+    if (force) {
+      setIsRecalculating(true);
+      showFeedback('Generating fresh insights...');
+    }
     
     // Get start of the week (last Sunday)
     const today = new Date();
@@ -48,10 +70,10 @@ export function DashboardScreen() {
     
     try {
       const snap = await getDoc(insightRef);
-      if (snap.exists()) {
+      if (snap.exists() && !force) {
         setWeeklyInsight(snap.data().insightText);
-      } else if (dayOfWeek === 0) { // Only generate on Sunday if missing
-        // Fetch last 7 days of data
+      } else if (dayOfWeek === 0 || force) { 
+        // Force or Sunday: Generate fresh
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const sevenDaysAgoStr = format(sevenDaysAgo, 'yyyy-MM-dd');
@@ -72,7 +94,7 @@ export function DashboardScreen() {
           fetchLogs('activityLogs') as Promise<ActivityLog[]>
         ]);
 
-        const insightText = await generateWeeklyInsight(profile, sleep, meals, move);
+        const insightText = await generateWeeklyInsight(user.uid, profile, sleep, meals, move);
         
         await setDoc(insightRef, {
           userId: user.uid,
@@ -82,143 +104,130 @@ export function DashboardScreen() {
         });
         
         setWeeklyInsight(insightText);
+        if (force) showFeedback('Weekly report recalculated!');
+      } else {
+        if (force) showFeedback('Deep dive is only available with enough data.');
       }
     } catch (err) {
       console.warn('Failed to fetch weekly insight:', err);
+      if (force) showFeedback('Failed to recalculate. Check connection.');
+    } finally {
+      if (force) setIsRecalculating(false);
     }
   }, [user, profile]);
 
-  const fetchNudge = useCallback(async () => {
+  const fetchDailyInsight = useCallback(async () => {
     if (!user || !profile) return;
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const nudgePath = `nutritionNudges/${user.uid}_${todayStr}`;
-    const nudgeRef = doc(db, nudgePath);
+    const insightPath = `dailyInsights/${user.uid}_${todayStr}`;
+    const insightRef = doc(db, insightPath);
     
     try {
-      const snap = await getDoc(nudgeRef);
-      if (snap.exists()) {
-        setNudge(snap.data().nudgeText);
-      } else {
-        const mealsPath = 'mealLogs';
-        const mealsQuery = query(
-          collection(db, mealsPath),
+      const snap = await getDoc(insightRef);
+      
+      // Fetch today's actual data to see if we should re-generate or if it's dynamic enough
+      const fetchLogs = async (collectionName: string) => {
+        const q = query(
+          collection(db, collectionName),
           where('userId', '==', user.uid),
-          orderBy('date', 'desc'),
-          limit(5)
+          where('date', '==', todayStr)
         );
-        
-        let meals: MealLog[] = [];
+        const snap = await getDocs(q);
+        return snap.docs.map(d => d.data());
+      };
+
+      const [sleepLogs, mealLogs, activityLogs] = await Promise.all([
+        fetchLogs('sleepLogs') as Promise<SleepLog[]>,
+        fetchLogs('mealLogs') as Promise<MealLog[]>,
+        fetchLogs('activityLogs') as Promise<ActivityLog[]>
+      ]);
+
+      const sleep = sleepLogs[0] || null;
+      const meals = mealLogs;
+      const move = activityLogs;
+
+      // Simple fingerprint: count of logs
+      const fingerprint = `${sleep ? 1 : 0}_${meals.length}_${move.length}`;
+
+      if (snap.exists() && snap.data().fingerprint === fingerprint) {
+        setDailyInsight(snap.data().insightText);
+      } else {
+        const newInsightText = await generateDailyInsight(user.uid, profile, sleep, meals, move);
         try {
-          const mealsSnap = await getDocs(mealsQuery);
-          meals = mealsSnap.docs.map(d => d.data() as MealLog);
-        } catch (err) {
-          console.warn('Failed to fetch meals for nudge:', err);
-        }
-        
-        const newNudgeText = await generateNutritionNudge(meals, profile);
-        try {
-          await setDoc(nudgeRef, {
+          await setDoc(insightRef, {
             userId: user.uid,
             date: todayStr,
-            nudgeText: newNudgeText,
+            insightText: newInsightText,
+            fingerprint,
             generatedAt: new Date().toISOString()
           });
         } catch (err) {
-           console.warn('Failed to save nudge:', err);
+           console.warn('Failed to save daily insight:', err);
         }
-        setNudge(newNudgeText);
+        setDailyInsight(newInsightText);
       }
     } catch (err) {
-      console.warn('Silent error in nudge fetching:', err);
+      console.warn('Silent error in daily insight fetching:', err);
     }
   }, [user, profile]);
 
   const fetchScores = useCallback(async () => {
     if (!user || !profile) return;
     const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+    const sixtyDaysAgoStr = format(sixtyDaysAgo, 'yyyy-MM-dd');
     
     try {
-      // 1. Sleep Quality Score
-      const sleepQuery = query(
-        collection(db, 'sleepLogs'),
-        where('userId', '==', user.uid),
-        where('date', '==', todayStr),
-        orderBy('loggedAt', 'desc'),
-        limit(1)
-      );
-      const sleepSnap = await getDocs(sleepQuery);
+      const fetchLogs = async (collectionName: string) => {
+        const q = query(
+          collection(db, collectionName),
+          where('userId', '==', user.uid),
+          where('date', '>=', sixtyDaysAgoStr)
+        );
+        const snap = await getDocs(q);
+        return snap.docs.map(d => d.data());
+      };
+
+      const [allSleepLogs, allMealLogs, allActivityLogs] = await Promise.all([
+        fetchLogs('sleepLogs') as Promise<SleepLog[]>,
+        fetchLogs('mealLogs') as Promise<MealLog[]>,
+        fetchLogs('activityLogs') as Promise<ActivityLog[]>
+      ]);
+
+      // 1. Current Scores
+      const todaySleepLogs = allSleepLogs.filter(l => l.date === todayStr);
       let sleepScore = 0;
       let sleepSubtext = 'No log today';
-      if (!sleepSnap.empty) {
-        const log = sleepSnap.docs[0].data();
-        const targetHours = profile.sleepTargetHours || 8;
-        const hourRatio = Math.min(log.hoursSlept / targetHours, 1.2);
-        // Score = 70% duration + 30% mood
-        sleepScore = Math.round((hourRatio * 70) + (log.moodRating * 6));
-        sleepSubtext = `${log.hoursSlept.toFixed(1)}h · Mood: ${log.moodRating}/5`;
+      if (todaySleepLogs.length > 0) {
+        const log = todaySleepLogs[0];
+        sleepScore = calculateSleepScore(log, profile);
+        sleepSubtext = `${log.hoursSlept.toFixed(2)}h · Mood: ${log.moodRating}/5`;
       }
 
-      // 2. Nutritional Eating Score
-      const mealQuery = query(
-        collection(db, 'mealLogs'),
-        where('userId', '==', user.uid),
-        where('date', '==', todayStr)
-      );
-      const mealSnap = await getDocs(mealQuery);
+      const todayMealLogs = allMealLogs.filter(l => l.date === todayStr);
       let eatScore = 0;
       let eatSubtext = 'Logs missing';
-      if (!mealSnap.empty) {
-        const meals = mealSnap.docs.map(d => d.data() as MealLog);
-        const avgHealth = meals.reduce((acc, m) => acc + m.overallHealthRating, 0) / meals.length;
+      if (todayMealLogs.length > 0) {
+        const avgHealth = todayMealLogs.reduce((acc, m) => acc + m.overallHealthRating, 0) / todayMealLogs.length;
         const targetCount = profile.dailyHealthyMealTarget || 3;
-        const countRatio = Math.min(meals.length / targetCount, 1);
-        // Score = 40% consistency + 60% quality
-        eatScore = Math.round((countRatio * 40) + (avgHealth * 12));
-        eatSubtext = `${meals.length}/${targetCount} meals · Health: ${avgHealth.toFixed(1)}/5`;
+        eatScore = calculateEatScore(todayMealLogs, profile);
+        eatSubtext = `${todayMealLogs.length}/${targetCount} meals · Health: ${avgHealth.toFixed(1)}/5`;
       } else {
         eatSubtext = `Target: ${profile.dailyHealthyMealTarget || 3} meals`;
       }
 
-      // 3. Physical Activity Score
-      const moveQuery = query(
-        collection(db, 'activityLogs'),
-        where('userId', '==', user.uid),
-        orderBy('date', 'desc'),
-        limit(20)
-      );
-      const moveSnap = await getDocs(moveQuery);
-      let moveScore = 0;
-      let moveSubtext = 'Ready for action?';
-      if (!moveSnap.empty) {
-        const logs = moveSnap.docs.map(d => d.data() as ActivityLog);
-        const todayLogs = logs.filter(l => l.date === todayStr);
-        
-        // Weekly consistency (Goal is weekly target)
-        const weeklyCount = logs.filter(l => {
-          const d = new Date(l.completedAt);
-          const now = new Date();
-          const diff = (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24);
-          return diff <= 7;
-        }).length;
-        
-        const target = profile.weeklyActivityTarget || 3;
-        const weekRatio = Math.min(weeklyCount / target, 1);
-        
-        // Day Effort Bonus (0 to 30)
-        let dayEffort = 0;
-        if (todayLogs.length > 0) {
-          dayEffort = todayLogs.reduce((acc, l) => {
-             const intensityMultiplier = l.intensity === 'hard' ? 1.5 : l.intensity === 'moderate' ? 1 : 0.6;
-             return acc + (l.durationMinutes * intensityMultiplier);
-          }, 0);
-        }
-        const dayEffortBonus = Math.min(dayEffort / 30 * 20, 30); // 30 mins moderate = full bonus
-        
-        moveScore = Math.round((weekRatio * 70) + dayEffortBonus);
-        moveSubtext = todayLogs.length > 0 ? `${todayLogs.length} activity today` : `${weeklyCount}/${target} this week`;
-      }
+      const todayMoveLogs = allActivityLogs.filter(l => l.date === todayStr);
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const weeklyMoveLogs = allActivityLogs.filter(l => new Date(l.completedAt) >= sevenDaysAgo);
+      
+      const moveScore = calculateMoveScore(todayMoveLogs, weeklyMoveLogs, profile);
+      const moveTarget = profile.weeklyActivityTarget || 3;
+      const weeklyCount = new Set(weeklyMoveLogs.map(l => l.date)).size;
+      const moveSubtext = todayMoveLogs.length > 0 ? `${todayMoveLogs.length} activity today` : `${weeklyCount}/${moveTarget} days this week`;
 
-      const total = Math.round((sleepScore + eatScore + moveScore) / 3);
+      const total = calculateOverallScore({ sleepScore, eatScore, moveScore });
       setTodayScore({ 
         sleep: Math.min(sleepScore, 100), 
         eat: Math.min(eatScore, 100), 
@@ -229,15 +238,19 @@ export function DashboardScreen() {
         moveSubtext
       });
 
-      // Background save - don't await to avoid blocking UI
+      // 2. Streaks
+      const currentStreaks = calculateStreaks(allSleepLogs, allMealLogs, allActivityLogs, profile);
+      setStreaks(currentStreaks);
+
+      // Background save
       const scoreId = `${user.uid}_${todayStr}`;
       setDoc(doc(db, 'loopScores', scoreId), {
         userId: user.uid,
         date: todayStr,
-        sleepScore: Math.min(sleepScore, 100),
-        eatScore: Math.min(eatScore, 100),
-        moveScore: Math.min(moveScore, 100),
-        overallScore: Math.min(total, 100),
+        sleepScore: Math.round(Math.min(sleepScore, 100)),
+        eatScore: Math.round(Math.min(eatScore, 100)),
+        moveScore: Math.round(Math.min(moveScore, 100)),
+        overallScore: Math.round(Math.min(total, 100)),
         computedAt: new Date().toISOString()
       }).catch(err => handleFirestoreError(err, OperationType.WRITE, `loopScores/${scoreId}`));
 
@@ -248,10 +261,30 @@ export function DashboardScreen() {
 
   useEffect(() => {
     let isMounted = true;
+    
+    const initializeUsage = async () => {
+      if (!user || !profile || profile.aiUsage) return;
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const userRef = doc(db, 'users', user.uid);
+      try {
+        await updateDoc(userRef, {
+          aiUsage: {
+            dailyRequests: 0,
+            totalRequests: 0,
+            lastResetDate: today,
+            balance: 100
+          }
+        });
+      } catch (err) {
+        console.warn('Failed to initialize AI usage:', err);
+      }
+    };
+
     const fetchAll = async () => {
       try {
+        await initializeUsage();
         await Promise.all([
-          fetchNudge(),
+          fetchDailyInsight(),
           fetchWeeklyInsight()
         ]);
         if (isMounted) {
@@ -263,7 +296,7 @@ export function DashboardScreen() {
     };
     fetchAll();
     return () => { isMounted = false; };
-  }, [fetchNudge, fetchWeeklyInsight, fetchScores, location.key]);
+  }, [user, profile, fetchDailyInsight, fetchWeeklyInsight, fetchScores, location.key]);
 
   const data = [
     { name: 'Completed', value: todayScore.total },
@@ -288,13 +321,19 @@ export function DashboardScreen() {
       </header>
 
       {/* Main Loop Visualization */}
-      <div className="relative aspect-square w-full max-w-[280px] min-h-[280px] mx-auto mb-10 flex items-center justify-center">
+      <div className="relative aspect-square w-full max-w-[300px] min-h-[300px] mx-auto mb-12 flex items-center justify-center">
+        {/* Glow behind the score */}
+        <div className={cn(
+          "absolute w-[70%] h-[70%] rounded-full blur-[60px] opacity-20 transition-all duration-1000",
+          todayScore.total > 70 ? "bg-teal" : todayScore.total > 40 ? "bg-amber" : "bg-red-500"
+        )} />
+        
         <div className="absolute inset-0 flex items-center justify-center">
           <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
             <PieChart>
               <Pie
                 data={data}
-                innerRadius="85%"
+                innerRadius="88%"
                 outerRadius="100%"
                 paddingAngle={0}
                 dataKey="value"
@@ -303,57 +342,115 @@ export function DashboardScreen() {
                 stroke="none"
               >
                 {data.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} cornerRadius={index === 0 ? 10 : 0} />
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={COLORS[index % COLORS.length]} 
+                    cornerRadius={12}
+                  />
                 ))}
               </Pie>
             </PieChart>
           </ResponsiveContainer>
         </div>
         
-        <div className="text-center relative z-10">
-          <span className="text-[64px] font-black leading-none block text-navy">{todayScore.total}</span>
-          <span className="text-slate/60 font-bold uppercase tracking-[0.2em] text-[12px]">Loop Score</span>
+        <div className="text-center relative z-10 flex flex-col items-center">
+          <motion.div
+            key={todayScore.total}
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="flex flex-col items-center"
+          >
+            <span className="text-[72px] font-black leading-none block text-navy tracking-tighter">{todayScore.total}</span>
+            <div className="flex items-center gap-1.5 mt-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal animate-pulse" />
+              <span className="text-slate/60 font-bold uppercase tracking-[0.25em] text-[10px]">Loop Score</span>
+            </div>
+          </motion.div>
         </div>
       </div>
 
+      {/* Streaks Banner */}
+      <div className="flex gap-3 mb-10 overflow-x-auto pb-2 scrollbar-none px-1">
+        {[
+          { label: 'Overall', value: streaks.overall, color: 'navy', icon: <Goal size={16} /> },
+          { label: 'Sleep', value: streaks.sleep, color: 'amber', icon: <Moon size={16} /> },
+          { label: 'Nutrition', value: streaks.eat, color: 'teal', icon: <Utensils size={16} /> },
+          { label: 'Active', value: streaks.move, color: 'violet', icon: <Zap size={16} /> }
+        ].map((s, i) => (
+          <motion.div 
+            key={s.label}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.1 }}
+            className={cn(
+              "shrink-0 px-4 py-3 rounded-2xl border flex items-center gap-3 shadow-sm transition-all",
+              s.color === 'navy' ? "bg-navy text-white border-navy" : 
+              s.color === 'amber' ? "bg-amber/5 text-amber border-amber/10" : 
+              s.color === 'teal' ? "bg-teal/5 text-teal border-teal/10" : 
+              "bg-violet/5 text-violet border-violet/10"
+            )}
+          >
+            <div className={cn(
+              "w-8 h-8 rounded-lg flex items-center justify-center",
+              s.color === 'navy' ? "bg-white/20" : "bg-white shadow-sm"
+            )}>
+              {s.icon}
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest opacity-60 leading-none mb-1">{s.label}</div>
+              <div className="text-[15px] font-black leading-none">{s.value} Day{s.value !== 1 && 's'}</div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
       {/* Domain Cards */}
-      <div className="grid grid-cols-1 gap-4 mb-8">
-        <button onClick={() => navigate('/sleep')} className="text-left w-full">
-          <Card domain="sleep" className="flex items-center gap-4 hover:shadow-md transition-all active:scale-[0.98]">
-            <div className="w-12 h-12 rounded-xl bg-amber/10 flex items-center justify-center text-amber">
-              <Moon size={24} />
+      <div className="grid grid-cols-1 gap-5 mb-10">
+        <button onClick={() => navigate('/sleep')} className="text-left w-full group">
+          <Card domain="sleep" className="flex items-center gap-5 p-5 hover:shadow-xl hover:-translate-y-1 transition-all active:scale-[0.98] border-none shadow-lifted">
+            <div className="w-14 h-14 rounded-2xl bg-amber/10 flex items-center justify-center text-amber shadow-inner group-hover:scale-110 transition-transform">
+              <Moon size={28} />
             </div>
             <div className="flex-1">
-              <h3 className="font-bold text-[17px]">Sleep Quality</h3>
-              <p className="text-slate text-sm font-medium">{todayScore.sleepSubtext}</p>
+              <h3 className="font-black text-lg text-navy leading-none mb-1.5">Sleep Quality</h3>
+              <p className="text-slate text-sm font-medium opacity-70">{todayScore.sleepSubtext}</p>
             </div>
-            <div className="text-amber font-black text-xl">{todayScore.sleep}%</div>
+            <div className="flex flex-col items-end">
+              <div className="text-amber font-black text-2xl leading-none">{todayScore.sleep.toFixed(0)}%</div>
+              <div className="text-[10px] font-black text-amber/40 uppercase tracking-widest mt-1">Daily</div>
+            </div>
           </Card>
         </button>
 
-        <button onClick={() => navigate('/eat')} className="text-left w-full">
-          <Card domain="eat" className="flex items-center gap-4 hover:shadow-md transition-all active:scale-[0.98]">
-            <div className="w-12 h-12 rounded-xl bg-teal/10 flex items-center justify-center text-teal">
-              <Utensils size={24} />
+        <button onClick={() => navigate('/eat')} className="text-left w-full group">
+          <Card domain="eat" className="flex items-center gap-5 p-5 hover:shadow-xl hover:-translate-y-1 transition-all active:scale-[0.98] border-none shadow-lifted">
+            <div className="w-14 h-14 rounded-2xl bg-teal/10 flex items-center justify-center text-teal shadow-inner group-hover:scale-110 transition-transform">
+              <Utensils size={28} />
             </div>
             <div className="flex-1">
-              <h3 className="font-bold text-[17px]">Nutritional Eating</h3>
-              <p className="text-slate text-sm font-medium">{todayScore.eatSubtext}</p>
+              <h3 className="font-black text-lg text-navy leading-none mb-1.5">Nutritional Eating</h3>
+              <p className="text-slate text-sm font-medium opacity-70">{todayScore.eatSubtext}</p>
             </div>
-            <div className="text-teal font-black text-xl">{todayScore.eat}%</div>
+            <div className="flex flex-col items-end">
+              <div className="text-teal font-black text-2xl leading-none">{todayScore.eat.toFixed(0)}%</div>
+              <div className="text-[10px] font-black text-teal/40 uppercase tracking-widest mt-1">Daily</div>
+            </div>
           </Card>
         </button>
 
-        <button onClick={() => navigate('/move')} className="text-left w-full">
-          <Card domain="move" className="flex items-center gap-4 hover:shadow-md transition-all active:scale-[0.98]">
-            <div className="w-12 h-12 rounded-xl bg-violet/10 flex items-center justify-center text-violet">
-              <Zap size={24} />
+        <button onClick={() => navigate('/move')} className="text-left w-full group">
+          <Card domain="move" className="flex items-center gap-5 p-5 hover:shadow-xl hover:-translate-y-1 transition-all active:scale-[0.98] border-none shadow-lifted">
+            <div className="w-14 h-14 rounded-2xl bg-violet/10 flex items-center justify-center text-violet shadow-inner group-hover:scale-110 transition-transform">
+              <Zap size={28} />
             </div>
             <div className="flex-1">
-              <h3 className="font-bold text-[17px]">Physical Activity</h3>
-              <p className="text-slate text-sm font-medium">{todayScore.moveSubtext}</p>
+              <h3 className="font-black text-lg text-navy leading-none mb-1.5">Physical Activity</h3>
+              <p className="text-slate text-sm font-medium opacity-70">{todayScore.moveSubtext}</p>
             </div>
-            <div className="text-violet font-black text-xl">{todayScore.move}%</div>
+            <div className="flex flex-col items-end">
+              <div className="text-violet font-black text-2xl leading-none">{todayScore.move.toFixed(0)}%</div>
+              <div className="text-[10px] font-black text-violet/40 uppercase tracking-widest mt-1">Daily</div>
+            </div>
           </Card>
         </button>
       </div>
@@ -361,37 +458,88 @@ export function DashboardScreen() {
       {/* Weekly Insight */}
       {weeklyInsight && (
         <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-white rounded-card p-8 border border-slate/5 mb-8 shadow-lifted relative overflow-hidden"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-[32px] p-8 border border-slate/5 mb-8 shadow-card relative overflow-hidden group"
         >
-          <div className="absolute top-0 right-0 p-4 opacity-5 rotate-12">
-            <Goal size={120} />
+          <div className="absolute top-0 right-0 p-8 opacity-5 rotate-12 transition-transform group-hover:rotate-45 duration-700">
+            <Goal size={160} />
           </div>
-          <h1 className="text-navy font-black text-2xl mb-6 flex items-center gap-3">
-             <Sparkles className="text-amber" size={24} />
-             Weekly Loop Insight
-          </h1>
-          <div className="prose prose-slate max-w-none text-slate font-medium space-y-4">
-             <ReactMarkdown>{weeklyInsight}</ReactMarkdown>
+          
+          <div className="flex items-center gap-4 mb-8">
+            <div className="w-14 h-14 rounded-2xl bg-violet/10 flex items-center justify-center text-violet shadow-inner">
+               <Sparkles className="animate-pulse" size={28} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-navy leading-none">Weekly Loop Deep Dive</h2>
+              <p className="text-[10px] font-black text-slate/40 uppercase tracking-[0.2em] mt-1">Generated by Sihat AI</p>
+            </div>
+          </div>
+          
+          <div className="prose prose-slate max-w-none 
+            prose-p:text-[16px] prose-p:leading-[1.7] prose-p:font-medium prose-p:text-navy/80 
+            prose-headings:text-navy prose-headings:font-black prose-headings:uppercase prose-headings:tracking-tight 
+            prose-strong:text-navy prose-strong:font-black 
+            prose-li:text-[15px] prose-li:font-medium
+            prose-code:bg-off-white prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-navy prose-code:font-bold">
+             <div className="markdown-body">
+               <ReactMarkdown>{weeklyInsight}</ReactMarkdown>
+             </div>
+          </div>
+          
+          <div className="mt-8 pt-6 border-t border-off-white flex justify-between items-center bg-white/50">
+             <span className="text-[10px] font-black uppercase text-slate/30 tracking-tight italic">Refreshes every Sunday • Stay consistent</span>
+             <button 
+               disabled={isRecalculating}
+               onClick={() => fetchWeeklyInsight(true)} 
+               className={cn(
+                 "text-[11px] font-black uppercase h-8 px-4 rounded-full border transition-all active:scale-95 flex items-center gap-2",
+                 isRecalculating 
+                  ? "bg-navy/10 text-navy/40 border-navy/5 cursor-not-allowed" 
+                  : "text-navy border-navy/10 hover:bg-navy hover:text-white"
+               )}
+             >
+               {isRecalculating && <RefreshCw size={12} className="animate-spin" />}
+               {isRecalculating ? 'Calculating...' : 'Recalculate'}
+             </button>
           </div>
         </motion.div>
       )}
 
-      {/* AI Nudge */}
-      {nudge && (
+      {/* Daily Insight */}
+      {dailyInsight && (
         <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-navy rounded-card p-6 text-white relative overflow-hidden mb-12 shadow-lifted"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-br from-navy to-navy/90 rounded-[32px] p-8 text-white relative overflow-hidden mb-16 shadow-2xl group"
         >
-          <div className="absolute top-0 right-0 p-3 opacity-20">
-            <Sparkles size={48} />
+          <div className="absolute -top-12 -right-12 w-48 h-48 bg-teal/20 blur-[80px] rounded-full" />
+          <div className="absolute top-0 right-0 p-6 opacity-30 group-hover:scale-110 transition-transform duration-500">
+            <Sparkles size={56} />
           </div>
-          <h4 className="text-yellow font-black uppercase tracking-widest text-[12px] mb-2">Nutrition Nudge</h4>
-          <p className="text-[17px] font-medium leading-relaxed relative z-10">{nudge}</p>
+          
+          <div className="relative z-10">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-2 h-2 rounded-full bg-yellow animate-ping" />
+              <h4 className="text-yellow font-black uppercase tracking-[0.2em] text-[11px]">Daily Micro-Insight</h4>
+            </div>
+            <p className="text-[19px] font-medium leading-relaxed tracking-tight text-white/90 italic">"{dailyInsight}"</p>
+          </div>
         </motion.div>
       )}
+
+      <AnimatePresence>
+        {feedback && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-navy text-white px-6 py-3 rounded-full font-bold shadow-2xl z-[100] whitespace-nowrap"
+          >
+            {feedback}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Layout>
   );
 }

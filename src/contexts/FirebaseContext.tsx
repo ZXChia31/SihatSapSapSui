@@ -5,7 +5,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User as FirebaseUser, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { User } from '../types';
 
@@ -25,23 +25,6 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-  const fetchProfile = async (uid: string) => {
-    const path = `users/${uid}`;
-    try {
-      const userRef = doc(db, 'users', uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
-        setProfile(userSnap.data() as User);
-      } else {
-        setProfile(null);
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, path);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -49,25 +32,47 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    let unsubscribeProfile: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
-        fetchProfile(firebaseUser.uid);
+        // Use onSnapshot for real-time profile updates
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        unsubscribeProfile = onSnapshot(userRef, (doc) => {
+          if (doc.exists()) {
+            setProfile(doc.data() as User);
+          } else {
+            setProfile(null);
+          }
+          setLoading(false);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
+          setLoading(false);
+        });
       } else {
+        if (unsubscribeProfile) unsubscribeProfile();
         setProfile(null);
         setLoading(false);
       }
     });
 
     return () => {
-      unsubscribe();
+      unsubscribeAuth();
+      if (unsubscribeProfile) unsubscribeProfile();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
   const refreshProfile = async () => {
-    if (user) await fetchProfile(user.uid);
+    if (user) {
+      const userRef = doc(db, 'users', user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        setProfile(userSnap.data() as User);
+      }
+    }
   };
 
   return (

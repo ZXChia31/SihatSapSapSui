@@ -5,6 +5,50 @@
 
 import { GuidedWorkout } from './types';
 
+export const HABIT_OPTIONS = {
+  sleep: [
+    "I sleep late and wake up tired regularly",
+    "I have an inconsistent sleep schedule",
+    "I use my phone right before bed",
+    "I often wake up in the middle of the night",
+    "I usually get 7-8 hours but feel sluggish",
+    "I rely on caffeine to stay awake",
+    "I have no trouble falling asleep but wake up early",
+    "I am a light sleeper, easily disturbed"
+  ],
+  eat: [
+    "I skip breakfast almost every day",
+    "I tend to overeat during dinner",
+    "I crave sugary snacks in the afternoon",
+    "I eat mostly processed or fast food",
+    "I drink very little water throughout the day",
+    "I eat mindfully but struggle with portions",
+    "I have a very consistent, healthy meal plan",
+    "I eat late at night before sleeping"
+  ],
+  move: [
+    "I sit at a desk for 8+ hours a day",
+    "I rarely walk or do any physical activity",
+    "I do light walking but no intense exercise",
+    "I exercise 1-2 times a week inconsistently",
+    "I am active but don't track my progress",
+    "I prefer high-intensity workouts",
+    "I enjoy outdoor activities like hiking/cycling",
+    "I struggle to stay motivated to move"
+  ]
+};
+
+export const AVATAR_OPTIONS = [
+  { id: 'avatar1', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix' },
+  { id: 'avatar2', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka' },
+  { id: 'avatar3', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Oliver' },
+  { id: 'avatar4', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Luna' },
+  { id: 'avatar5', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Leo' },
+  { id: 'avatar6', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Zoe' },
+  { id: 'avatar7', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Milo' },
+  { id: 'avatar8', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Coco' },
+];
+
 export const GUIDED_WORKOUTS: GuidedWorkout[] = [
   // 10-minute workouts
   {
