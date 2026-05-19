@@ -89,6 +89,8 @@ export interface ActivityLog {
   activityType: ActivityType;
   durationMinutes: number;
   intensity: Intensity;
+  moodRating?: number; // 1-5
+  energyLevel?: number; // 1-5
   completedAt: string;
 }
 

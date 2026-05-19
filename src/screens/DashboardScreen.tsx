@@ -10,7 +10,7 @@ import { useFirebase } from '../contexts/FirebaseContext';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { format } from 'date-fns';
-import { Goal, Moon, Utensils, Zap, Sparkles } from 'lucide-react';
+import { Goal, Moon, Utensils, Zap, Sparkles, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -283,10 +283,11 @@ export function DashboardScreen() {
     const fetchAll = async () => {
       try {
         await initializeUsage();
-        await Promise.all([
-          fetchDailyInsight(),
-          fetchWeeklyInsight()
-        ]);
+        // Sequentialize to avoid burst 429s
+        await fetchDailyInsight();
+        await new Promise(res => setTimeout(res, 1000));
+        await fetchWeeklyInsight();
+        
         if (isMounted) {
           await fetchScores();
         }
@@ -298,12 +299,29 @@ export function DashboardScreen() {
     return () => { isMounted = false; };
   }, [user, profile, fetchDailyInsight, fetchWeeklyInsight, fetchScores, location.key]);
 
-  const data = [
-    { name: 'Completed', value: todayScore.total },
-    { name: 'Remaining', value: 100 - todayScore.total },
-  ];
+  // Domain logic: Full circle composition based on relative contributions.
+  // If Eat is 0, the circle is split only between Sleep and Move.
+  // This helps visualize the "Loop balance".
+  // Domain logic: Compositional visualization of the Loop.
+  // The circle represents the 100% of the active loop components.
+  // If a domain is 0, it doesn't take up space, allowing others to fill the loop proportionally.
+  const activeSegments = [
+    { name: 'Sleep', value: todayScore.sleep || 0 },
+    { name: 'Eat', value: todayScore.eat || 0 },
+    { name: 'Move', value: todayScore.move || 0 },
+  ].filter(d => d.value > 0);
 
-  const COLORS = ['#FFD600', '#00C896', '#7C3AED', '#F1F5F9'];
+  // If nothing is logged, we show the 'Empty' state which is the grey track.
+  const chartData = activeSegments.length > 0 
+    ? activeSegments 
+    : [{ name: 'Empty', value: 1 }];
+
+  const DOMAIN_COLORS: Record<string, string> = {
+    'Sleep': '#FFD600', // Amber
+    'Eat': '#00C896',   // Teal/Green
+    'Move': '#7C3AED',  // Violet
+    'Empty': '#F1F5F9'  // Slate/Grey
+  };
 
   return (
     <Layout userPhoto={profile?.photoUrl}>
@@ -321,31 +339,37 @@ export function DashboardScreen() {
       </header>
 
       {/* Main Loop Visualization */}
-      <div className="relative aspect-square w-full max-w-[300px] min-h-[300px] mx-auto mb-12 flex items-center justify-center">
+      <div className="relative w-full max-w-[340px] mx-auto mb-12 aspect-square flex items-center justify-center">
         {/* Glow behind the score */}
         <div className={cn(
-          "absolute w-[70%] h-[70%] rounded-full blur-[60px] opacity-20 transition-all duration-1000",
+          "absolute inset-0 m-auto w-[75%] h-[75%] rounded-full blur-[60px] opacity-20 transition-all duration-1000",
           todayScore.total > 70 ? "bg-teal" : todayScore.total > 40 ? "bg-amber" : "bg-red-500"
         )} />
         
-        <div className="absolute inset-0 flex items-center justify-center">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+        <div className="absolute inset-0 w-full h-full flex items-center justify-center">
+          <ResponsiveContainer width="95%" aspect={1}>
             <PieChart>
               <Pie
-                data={data}
+                data={chartData}
                 innerRadius="88%"
                 outerRadius="100%"
-                paddingAngle={0}
+                paddingAngle={activeSegments.length > 1 ? 6 : 0}
                 dataKey="value"
                 startAngle={90}
                 endAngle={-270}
                 stroke="none"
+                animationBegin={0}
+                animationDuration={1200}
+                animationEasing="ease-out"
+                isAnimationActive={true}
               >
-                {data.map((entry, index) => (
+                {chartData.map((entry) => (
                   <Cell 
-                    key={`cell-${index}`} 
-                    fill={COLORS[index % COLORS.length]} 
-                    cornerRadius={12}
+                    key={`cell-${entry.name}`} 
+                    fill={DOMAIN_COLORS[entry.name] || '#CBD5E1'} 
+                    cornerRadius={activeSegments.length <= 1 ? 0 : 12}
+                    style={{ outline: 'none' }}
+                    stroke="none"
                   />
                 ))}
               </Pie>
@@ -353,19 +377,34 @@ export function DashboardScreen() {
           </ResponsiveContainer>
         </div>
         
-        <div className="text-center relative z-10 flex flex-col items-center">
-          <motion.div
-            key={todayScore.total}
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="flex flex-col items-center"
-          >
-            <span className="text-[72px] font-black leading-none block text-navy tracking-tighter">{todayScore.total}</span>
-            <div className="flex items-center gap-1.5 mt-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-teal animate-pulse" />
-              <span className="text-slate/60 font-bold uppercase tracking-[0.25em] text-[10px]">Loop Score</span>
-            </div>
-          </motion.div>
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="text-center flex flex-col items-center">
+            <motion.div
+              key={todayScore.total}
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="flex flex-col items-center"
+            >
+              <span className="text-[72px] font-black leading-none block text-navy tracking-tighter">{todayScore.total}</span>
+              <span className="text-slate/40 font-black uppercase tracking-[0.25em] text-[10px] mt-1">Loop Score</span>
+            </motion.div>
+          </div>
+        </div>
+      </div>
+
+      {/* Domain Legend */}
+      <div className="flex justify-center gap-5 mb-12 -mt-4">
+        <div className="flex items-center gap-2">
+          <div className="w-2.5 h-2.5 rounded-full bg-amber shadow-[0_0_8px_rgba(255,193,7,0.3)]" />
+          <span className="text-[10px] font-black text-navy/50 uppercase tracking-widest">Sleep</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-2.5 h-2.5 rounded-full bg-teal shadow-[0_0_8px_rgba(0,200,150,0.3)]" />
+          <span className="text-[10px] font-black text-navy/50 uppercase tracking-widest">Eat</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-2.5 h-2.5 rounded-full bg-violet shadow-[0_0_8px_rgba(124,58,237,0.3)]" />
+          <span className="text-[10px] font-black text-navy/50 uppercase tracking-widest">Move</span>
         </div>
       </div>
 

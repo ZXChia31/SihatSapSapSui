@@ -10,38 +10,115 @@ interface GeminiError {
 }
 
 const PRIMARY_MODEL = "gemini-3-flash-preview";
-const FALLBACK_MODELS = ["gemini-flash-latest", "gemini-3.1-flash-lite"];
+const FALLBACK_MODELS = ["gemini-flash-latest", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-3.1-flash-lite"];
 
-async function generateWithFallback(ai: GoogleGenAI, prompt: string, modelIndex: number = -1): Promise<string> {
+// Simple promise-based queue to limit concurrency to 1 request at a time
+let requestQueue: Promise<void> = Promise.resolve();
+
+// Cooldowns for models hitting 429/503 to avoid immediate retries on the same model
+const modelCooldowns: Record<string, number> = {};
+
+function isModelOnCooldown(model: string): boolean {
+  const cooldown = modelCooldowns[model];
+  if (!cooldown) return false;
+  if (Date.now() > cooldown) {
+    delete modelCooldowns[model];
+    return false;
+  }
+  return true;
+}
+
+function setModelCooldown(model: string, durationMs: number = 30000) {
+  modelCooldowns[model] = Date.now() + durationMs;
+}
+
+async function performGeneration(ai: GoogleGenAI, prompt: string, modelIndex: number = -1): Promise<string> {
   const modelToUse = modelIndex === -1 ? PRIMARY_MODEL : FALLBACK_MODELS[modelIndex];
   
-  try {
-    const response = await ai.models.generateContent({
-      model: modelToUse,
-      contents: prompt,
-    });
-    return response.text?.trim() || "No response generated.";
-  } catch (error: unknown) {
-    const err = error as GeminiError;
-    const errStr = JSON.stringify(err);
-    const isRetryable = 
-      err?.status === 429 || 
-      err?.code === 429 || 
-      err?.status === 404 ||
-      err?.code === 404 ||
-      errStr.includes('429') || 
-      errStr.includes('404') ||
-      errStr.toLowerCase().includes('quota') ||
-      errStr.toLowerCase().includes('not supported') ||
-      errStr.toLowerCase().includes('not found');
-
-    if (isRetryable && modelIndex < FALLBACK_MODELS.length - 1) {
-      console.warn(`Error with ${modelToUse}, trying fallback ${FALLBACK_MODELS[modelIndex + 1]}. Error: ${errStr}`);
-      return generateWithFallback(ai, prompt, modelIndex + 1);
-    }
-    
-    throw error;
+  // If model is on cooldown and we have fallbacks, move to next model immediately
+  if (isModelOnCooldown(modelToUse) && modelIndex < FALLBACK_MODELS.length - 1) {
+    console.warn(`Model ${modelToUse} is on cooldown, skipping to next fallback.`);
+    return performGeneration(ai, prompt, modelIndex + 1);
   }
+
+  const maxRetries = 3; // Reduced individual model retries to fail over faster
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelToUse,
+        contents: prompt,
+      });
+      return response.text?.trim() || "No response generated.";
+    } catch (error: unknown) {
+      lastError = error;
+      const err = error as GeminiError;
+      const errStr = JSON.stringify(err);
+      
+      const isQuotaError = 
+        err?.status === 429 || err?.code === 429 || 
+        errStr.includes('429') || 
+        errStr.toLowerCase().includes('quota') ||
+        errStr.toLowerCase().includes('too many requests');
+
+      const isServiceUnavailable = 
+        err?.status === 503 || err?.code === 503 ||
+        errStr.includes('503') ||
+        errStr.toLowerCase().includes('high demand') ||
+        errStr.toLowerCase().includes('unavailable');
+
+      const isRetryable = 
+        isQuotaError ||
+        isServiceUnavailable ||
+        errStr.toLowerCase().includes('deadline exceeded');
+
+      if (isRetryable) {
+        // If it's a quota or service error and we have a fallback, fail over immediately
+        if (isQuotaError || isServiceUnavailable) {
+          const reason = isQuotaError ? "QUOTA EXCEEDED" : "SERVICE UNAVAILABLE";
+          console.error(`${reason} for ${modelToUse}. Entering 60s cooldown.`);
+          setModelCooldown(modelToUse, 60000);
+          
+          if (modelIndex < FALLBACK_MODELS.length - 1) {
+            console.warn(`Failover: Model ${modelToUse} is ${reason.toLowerCase()}. Trying next fallback model immediately.`);
+            return performGeneration(ai, prompt, modelIndex + 1);
+          }
+        }
+
+        // 5s, 10s backoff for other retryable errors or if no fallbacks left
+        const delay = Math.pow(2, attempt) * 5000 + Math.random() * 2000;
+        console.warn(`Retryable error with ${modelToUse} (attempt ${attempt + 1}/${maxRetries}). Retrying in ${Math.round(delay)}ms. Error: ${errStr}`);
+        await new Promise(res => setTimeout(res, delay));
+        
+        if (attempt === maxRetries - 1 && modelIndex < FALLBACK_MODELS.length - 1) {
+          return performGeneration(ai, prompt, modelIndex + 1);
+        }
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError || new Error(`Failed after ${maxRetries} attempts.`);
+}
+
+async function generateWithFallback(ai: GoogleGenAI, prompt: string): Promise<string> {
+  // Add this request to the queue chain to serialize AI calls
+  const result = new Promise<string>((resolve, reject) => {
+    requestQueue = requestQueue.then(async () => {
+      try {
+        const text = await performGeneration(ai, prompt);
+        // Small mandatory delay between successful requests to respect rate limits
+        await new Promise(res => setTimeout(res, 1500));
+        resolve(text);
+      } catch (err) {
+        reject(err);
+      }
+    }).catch(err => {
+      console.error("Queue execution error:", err);
+    });
+  });
+  return result;
 }
 
 async function startServer() {
@@ -99,21 +176,23 @@ async function startServer() {
     }
 
     const prompt = `
-      You are the "SihatLoop AI", a hyper-personalized health coach for SihatSapSapSui.
-      User Profile: ${JSON.stringify(profile)}
-      Today's Data:
-      - Sleep: ${sleep ? JSON.stringify(sleep) : "Not logged yet"}
-      - Meals: ${meals.length > 0 ? JSON.stringify(meals) : "None logged today"}
-      - Activities: ${move.length > 0 ? JSON.stringify(move) : "None logged today"}
+      You are "SihatLoop AI", a hyper-personalized health coach for SihatLoop.
+      
+      USER CONTEXT:
+      - Profile Goals: ${JSON.stringify(profile)}
+      - Recent Sleep Session: ${sleep ? JSON.stringify(sleep) : "Not logged yet"} (Fields: bedtime, wakeTime, hoursSlept, moodRating)
+      - Today's Meals: ${meals.length > 0 ? JSON.stringify(meals) : "None yet"} (Fields: mealSlot, overallHealthRating, proteinGrams, fatGrams, fiberGrams)
+      - Today's Activity: ${move.length > 0 ? JSON.stringify(move) : "None yet"} (Fields: activityName, intensity, durationMinutes, moodRating, energyLevel)
 
-      TASK: Provide a single, punchy, real-time "Loop Insight" (max 200 characters).
-      Guidelines:
-      1. SYNCHRONIZATION: If a category is missing, encourage logging it relative to what IS logged.
-      2. PUNCHY: No "Based on your data...". Dive straight in.
-      3. HOLISTIC: Connect the dots if possible (e.g., "Late dinner might explain the lower sleep mood rating").
-      4. DO NOT BE GENERIC. If they have no meals, DO NOT give nutrition advice. Mention the activity or sleep instead.
+      TASK: Provide a single, actionable "Loop Insight" (max 200 characters).
+      
+      STRICT ANALYTICAL GUIDELINES:
+      1. CORRELATION REVEAL: Connect today's data points. E.g., "Your high-intensity Move session usually bumps your Sleep session mood – log it today to confirm!" or "That 'snack' slot meal might be affecting your next activity intensity."
+      2. DATA-SPECIFIC ACTION: If a goal is missed (e.g., missed Move target), suggest an immediate recovery move based on current mood or energy.
+      3. LOGGING TRIGGER: Use gaps in logging as a tool. "Log your dinner to see if your Move energy level holds up tomorrow morning."
+      4. NO FILLER: Start immediately with the insight. No "I see that..." or "Based on...".
 
-      Tone: Wise, encouraging, slightly technical but accessible.
+      Tone: Wise, slightly technical, highly specific.
     `;
 
     try {
@@ -121,8 +200,15 @@ async function startServer() {
       res.json({ text });
     } catch (error: unknown) {
       const err = error as GeminiError;
+      const errStr = JSON.stringify(err);
       console.error("Gemini Daily Insight Error:", err);
-      if (err?.status === 429 || err?.code === 429 || err?.message?.includes('429') || err?.message?.toLowerCase().includes('quota')) {
+      const isCapacityError = 
+        err?.status === 429 || err?.code === 429 || 
+        err?.status === 503 || err?.code === 503 ||
+        err?.message?.includes('429') || err?.message?.includes('503') ||
+        errStr.toLowerCase().includes('quota') || errStr.toLowerCase().includes('demand');
+
+      if (isCapacityError) {
         return res.json({ text: "AI is currently resting to save energy! Your daily insight will return shortly. Keep looping!" });
       }
       res.status(500).json({ error: "Failed to generate daily insight" });
@@ -136,20 +222,28 @@ async function startServer() {
     }
     const { profile, sleep, meals, move } = req.body;
     const prompt = `
-      You are an expert health pattern analyst for SihatSapSapSui.
-      User Profile: ${JSON.stringify(profile)}
-      Sleep Logs (last 7d): ${JSON.stringify(sleep)}
-      Meal Logs (last 7d): ${JSON.stringify(meals)}
-      Activity Logs (last 7d): ${JSON.stringify(move)}
+      You are an expert health pattern analyst for SihatLoop.
+      
+      DATA SET (Last 7 Days):
+      - User Goals: ${JSON.stringify(profile)}
+      - Sleep: ${JSON.stringify(sleep)}
+      - Meals: ${JSON.stringify(meals)}
+      - Move: ${JSON.stringify(move)}
 
-      TASK: Write a "Weekly Loop Insight" in Markdown format. 
-      Structure:
-      1. **The Highlight**: Identify one clear positive trend across the 3 domains.
-      2. **The Growth Point**: Identify one area for improvement (e.g. erratic bedtime, low moves).
-      3. **The Micro-Decision**: One extremely small, specific action for next week.
+      TASK: Write a "Weekly Loop Insight" in Markdown. 
+      Focus on revealing hidden correlations between these data points.
+      
+      REQUIRED ANALYSIS:
+      1. **Sleep-Mood Link**: Analyze correlation between sleep session consistency or weight/height factors and the waking moodRating. Does 7h vs 8h sleep change the mood specifically for this user?
+      2. **Meal-Energy Link**: How do mealSlot timings and overallHealthRating of meals impact the energyLevel reported in subsequent ActivityLogs?
+      3. **Activity-Recovery Link**: Relationship between activity intensity/duration and the subsequent SleepLog hoursSlept or moodRating. Does 'hard' intensity lead to better sleep sessions?
 
-      Tone: Honest but empowering. Avoid clinical jargon. Use "we" and "you".
-      Max length: 800 characters.
+      STRUCTURE:
+      1. **Weekly Breakthrough**: One specific data-backed win (e.g. "You're 15% more consistent with sleep timing on days you log a 'hard' intensity Move").
+      2. **The Friction Point**: One specific correlation explaining a goal shortfall.
+      3. **Strategic Pivot**: One highly specific, measurable habit change for next week.
+
+      Tone: Data-driven, blunt but encouraging. Max 800 characters.
     `;
 
     try {
@@ -157,8 +251,15 @@ async function startServer() {
       res.json({ text });
     } catch (error: unknown) {
       const err = error as GeminiError;
+      const errStr = JSON.stringify(err);
       console.error("Gemini Insight Error:", err);
-      if (err?.status === 429 || err?.code === 429 || err?.message?.includes('429') || err?.message?.toLowerCase().includes('quota')) {
+      const isCapacityError = 
+        err?.status === 429 || err?.code === 429 || 
+        err?.status === 503 || err?.code === 503 ||
+        err?.message?.includes('429') || err?.message?.includes('503') ||
+        errStr.toLowerCase().includes('quota') || errStr.toLowerCase().includes('demand');
+
+      if (isCapacityError) {
         return res.json({ text: "### Weekly Status: Processing...\n\nOur AI is currently at capacity. Please check back in a few minutes for your deep-dive weekly analysis!" });
       }
       res.status(500).json({ error: "Failed to generate insight" });
@@ -172,39 +273,53 @@ async function startServer() {
       return res.status(500).json({ error: "Gemini API is not configured" });
     }
     const { domain, logs, profile } = req.body;
+    
+    let domainSpecificInstructions = "";
+    if (domain === "Sleep") {
+      domainSpecificInstructions = `
+        - Correlation: Time of day consistency vs. moodRating.
+        - Pattern: Does duration (hoursSlept) or specific timing windows predict a higher moodRating?
+        - Specificity: Identifying the 'Golden Window' of sleep sessions for this user.
+      `;
+    } else if (domain === "Eat") {
+      domainSpecificInstructions = `
+        - Correlation: Meal timing (mealSlot) distribution vs. overallHealthRating.
+        - Pattern: Relationship between specific mealSlot ratings and subsequent ActivityLog energyLevels (if provided in context).
+        - Advice: Precise nutritional timing based on when their energy usually dips.
+      `;
+    } else if (domain === "Move") {
+      domainSpecificInstructions = `
+        - Correlation: Relationship between activity intensity (Light/Moderate/Hard), duration, moodRating, and energyLevel.
+        - Pattern: Which activityType or intensity yields the highest mood improvement?
+        - Advice: Optimal duration/intensity combo to maximize post-workout energyLevel.
+      `;
+    }
+
     const prompt = `
-      You are a world-class health data scientist and behavioral specialist for the SihatLoop (SihatSapSapSui) application.
-      
+      You are a world-class health data scientist for SihatLoop.
       DOMAIN: ${domain} loop
-      CURRENT USER PROFILE DATA:
-      ${JSON.stringify(profile, null, 2)}
-      
-      ACTUAL HISTORICAL LOGS (Last 20 entries):
-      ${JSON.stringify(logs, null, 2)}
+      USER PROFILE: ${JSON.stringify(profile)}
+      HISTORICAL DATA (Last 20 entries): ${JSON.stringify(logs)}
 
       OBJECTIVE:
-      Provide a highly precise, data-driven analysis of the user's current health loop. Do NOT provide generic health advice. Your analysis must be entirely derived from the specific logs and profile data provided above.
-
-      ANALYTICAL REQUIREMENTS:
-      1. CRITICAL TRENDS: Identify at least one hidden trend or correlation (e.g., "Your sleep duration drops by 12% on nights following high-intensity Move activities").
-      2. ANOMALY DETECTION: Point out a specific outlier or deviation from their stated goals.
-      3. CAUSAL HYPOTHESIS: Suggest a potential reason for a specific pattern based on the data provided.
-      4. PRECISION ACTION PLAN: Provide 3 actionable, measurable steps to improve their ${domain} score by 10% in the next 7 days.
-
-      STYLE SPECIFICATIONS:
-      - Be blunt, technical, and objective.
-      - Use Markdown hierarchy (H3/H4).
-      - Absolute NO boilerplate like "I hope this helps" or "Here is your analysis".
-      - Maximum 1500 characters.
+      Perform deep-dive correlation analysis between fields: ${domain === 'Sleep' ? 'bedtime, wakeTime, hoursSlept, moodRating' : domain === 'Eat' ? 'mealSlot, overallHealthRating, protein/fat/fiber' : 'intensity, durationMinutes, moodRating, energyLevel'}.
+      
+      CORE REQUIREMENTS:
+      ${domainSpecificInstructions}
+      - Use specific percentages and numbers from the logs (e.g., "Your energyLevel peaks 22% higher after morning moderate-intensity sessions").
+      - CAUSAL HYPOTHESIS: Suggest *why* this reflects their unique biology or habits.
+      - BLUNTNESS: If data is inconsistent, point it out as the main hurdle.
 
       OUTPUT STRUCTURE (Strict):
       ### Deep Analytics & Patterns
-      [Your data-driven analysis here]
+      [Concise data-driven breakdown]
 
       ### Optimized Loop Strategy
       1. [Measurable Action 1]
       2. [Measurable Action 2]
       3. [Measurable Action 3]
+      
+      Tone: Technical, clear, data-first. Max 1200 characters.
     `;
 
     try {
@@ -212,8 +327,15 @@ async function startServer() {
       res.json({ text });
     } catch (error: unknown) {
       const err = error as GeminiError;
+      const errStr = JSON.stringify(err);
       console.error("Gemini Analyze Error:", err);
-      if (err?.status === 429 || err?.code === 429 || err?.message?.includes('429') || err?.message?.toLowerCase().includes('quota')) {
+      const isCapacityError = 
+        err?.status === 429 || err?.code === 429 || 
+        err?.status === 503 || err?.code === 503 ||
+        err?.message?.includes('429') || err?.message?.includes('503') ||
+        errStr.toLowerCase().includes('quota') || errStr.toLowerCase().includes('demand');
+
+      if (isCapacityError) {
         return res.json({ text: "### Deep Analytics & Patterns\n\nAI Analysis is temporarily unavailable due to high demand. Please try again in a few moments to see your custom trends." });
       }
       res.status(500).json({ error: "Failed to perform analysis" });
@@ -223,7 +345,10 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        hmr: false 
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);

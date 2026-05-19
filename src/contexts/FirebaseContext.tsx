@@ -35,6 +35,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
     let unsubscribeProfile: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      setLoading(true);
       setUser(firebaseUser);
       if (firebaseUser) {
         // Use onSnapshot for real-time profile updates

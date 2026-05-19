@@ -36,6 +36,8 @@ export function MoveScreen() {
   const [activityName, setActivityName] = useState('');
   const [duration, setDuration] = useState('30');
   const [intensity, setIntensity] = useState<'light' | 'moderate' | 'hard'>('moderate');
+  const [moodRating, setMoodRating] = useState(3);
+  const [energyLevel, setEnergyLevel] = useState(3);
 
   // Real-time Workout State
   const [workoutStep, setWorkoutStep] = useState(0);
@@ -204,6 +206,8 @@ export function MoveScreen() {
       activityType: selectedWorkout ? 'guided' : 'self_logged',
       durationMinutes: parseInt(duration),
       intensity: intensity,
+      moodRating: moodRating,
+      energyLevel: energyLevel,
       completedAt: new Date().toISOString()
     };
 
@@ -254,6 +258,8 @@ export function MoveScreen() {
     setActivityName('');
     setDuration('30');
     setIntensity('moderate');
+    setMoodRating(3);
+    setEnergyLevel(3);
     setWorkoutStep(0);
     setIsWorkoutStarted(false);
   };
@@ -263,6 +269,8 @@ export function MoveScreen() {
     setActivityName(log.activityName);
     setDuration(log.durationMinutes.toString());
     setIntensity(log.intensity);
+    setMoodRating(log.moodRating || 3);
+    setEnergyLevel(log.energyLevel || 3);
     setIsManualLogOpen(true);
   };
 
@@ -369,7 +377,9 @@ export function MoveScreen() {
                       </div>
                       <div>
                         <h5 className="font-bold text-navy text-[15px]">{log.activityName}</h5>
-                        <span className="text-xs font-medium text-slate uppercase">{format(new Date(log.date), 'MMM d')} · {log.durationMinutes}m · {log.intensity}</span>
+                        <span className="text-xs font-medium text-slate uppercase">
+                          {format(new Date(log.date), 'MMM d')} · {log.durationMinutes}m · {log.intensity} {log.moodRating && `· Mood: ${log.moodRating}`} {log.energyLevel && `· Energy: ${log.energyLevel}`}
+                        </span>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 relative z-30 transition-all">
@@ -476,6 +486,42 @@ export function MoveScreen() {
                     ))}
                   </div>
                 </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate">Post-Activity Mood</label>
+                  <div className="flex justify-between gap-1">
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <button
+                        key={num}
+                        onClick={() => setMoodRating(num)}
+                        className={cn(
+                          "flex-1 h-12 rounded-xl transition-all flex items-center justify-center text-lg",
+                          moodRating === num ? "bg-violet text-white scale-110 shadow-lg shadow-violet/20" : "bg-off-white text-slate grayscale opacity-60"
+                        )}
+                      >
+                        {['😫', '😕', '😐', '😊', '🤩'][num-1]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate">Post-Activity Energy</label>
+                  <div className="flex justify-between gap-1">
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <button
+                        key={num}
+                        onClick={() => setEnergyLevel(num)}
+                        className={cn(
+                          "flex-1 h-12 rounded-xl transition-all flex items-center justify-center font-black",
+                          energyLevel === num ? "bg-teal text-white scale-110 shadow-lg shadow-teal/20" : "bg-off-white text-slate opacity-60"
+                        )}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col gap-3">
@@ -519,12 +565,12 @@ export function MoveScreen() {
                 </span>
                 <button onClick={resetForms} className="text-slate hover:text-navy transition-colors"><X size={24} /></button>
              </div>
-             <main className="flex-1 flex flex-col items-center justify-center p-8 text-center overflow-y-auto bg-off-white/10">
+             <main className="flex-1 flex flex-col items-center justify-start p-8 text-center overflow-y-auto bg-off-white/10 pt-16 pb-20">
                 <motion.div 
                   key={workoutStep}
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
-                  className="w-full max-w-sm flex flex-col items-center"
+                  className="w-full max-w-sm flex flex-col items-center min-h-max"
                 >
                   <div className="w-20 h-20 rounded-full bg-violet text-white flex items-center justify-center font-black text-2xl mb-8 shadow-xl shadow-violet/20">
                     {workoutStep + 1}
@@ -610,7 +656,7 @@ export function MoveScreen() {
                 </motion.div>
               </main>
 
-             <footer className="p-8 pb-12 flex gap-4 w-full max-w-[420px] mx-auto">
+             <footer className="p-8 pb-12 flex gap-4 w-full max-w-[420px] mx-auto bg-white border-t border-off-white/50">
                 {workoutStep > 0 && (
                   <button 
                     onClick={() => handleStepChange(workoutStep - 1)}

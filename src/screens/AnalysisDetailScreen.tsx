@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
+import { User, SleepLog } from '../types';
 
 export function AnalysisDetailScreen() {
   const { domain: domainParam } = useParams<{ domain: string }>();
@@ -22,8 +23,55 @@ export function AnalysisDetailScreen() {
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
   const [showThanks, setShowThanks] = useState(false);
 
+  const logs = (location.state?.logs || []) as SleepLog[];
+  const profile = location.state?.profile as User | undefined;
   const isSleep = domain.toLowerCase() === 'sleep';
   const isEat = domain.toLowerCase() === 'eat';
+
+  const timeToMinutes = (time: string) => {
+    if (!time) return 0;
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  const getSleepTimingInconsistencies = () => {
+    if (!isSleep || !logs.length || !profile?.sleepTargetBedtime) return [];
+    
+    const inconsistencies = [];
+    const targetBed = timeToMinutes(profile.sleepTargetBedtime);
+    const targetWake = timeToMinutes(profile.sleepTargetWakeTime);
+    
+    // Use last 7 logs
+    const recentLogs = [...logs]
+      .filter((l) => l.bedtime && l.wakeTime)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 7);
+
+    for (const log of recentLogs) {
+      const bed = timeToMinutes(log.bedtime);
+      const wake = timeToMinutes(log.wakeTime);
+      
+      const bedDiff = Math.abs(bed - targetBed);
+      const wakeDiff = Math.abs(wake - targetWake);
+      
+      const normBedDiff = Math.min(bedDiff, 1440 - bedDiff);
+      const normWakeDiff = Math.min(wakeDiff, 1440 - wakeDiff);
+
+      if (normBedDiff > 60 || normWakeDiff > 60) {
+        inconsistencies.push({
+          date: log.date,
+          bedDiff: normBedDiff,
+          wakeDiff: normWakeDiff,
+          bedtime: log.bedtime,
+          wakeTime: log.wakeTime,
+          isBedLate: bed > targetBed && bed - targetBed < 720,
+        });
+      }
+    }
+    return inconsistencies;
+  };
+
+  const sleepIssues = getSleepTimingInconsistencies();
 
   const handleFeedback = (type: 'up' | 'down') => {
     setFeedback(type);
@@ -142,48 +190,91 @@ export function AnalysisDetailScreen() {
               prose-ul:my-10 prose-ul:list-disc prose-ul:pl-6
               prose-blockquote:border-l-4 prose-blockquote:border-teal/30 prose-blockquote:bg-teal/5 prose-blockquote:p-6 prose-blockquote:rounded-r-2xl prose-blockquote:italic
               prose-code:bg-navy/5 prose-code:px-2 prose-code:py-1 prose-code:rounded prose-code:text-navy prose-code:font-bold prose-code:before:content-none prose-code:after:content-none">
+              
+              {isSleep && sleepIssues.length > 0 && (
+                <div className="mb-12 p-6 bg-amber/5 rounded-[32px] border border-amber/10">
+                   <h3 className="text-amber font-black uppercase tracking-widest text-[11px] mb-4 flex items-center gap-2">
+                     <Calendar size={14} /> Schedule Drift Detected
+                   </h3>
+                   <div className="space-y-3">
+                     {sleepIssues.map((issue, idx) => (
+                       <div key={idx} className="flex items-center justify-between bg-white/50 p-4 rounded-2xl border border-slate/5">
+                         <div>
+                            <span className="text-[10px] font-black text-slate/40 uppercase block mb-1">{new Date(issue.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                            <span className="text-[14px] font-bold text-navy">{issue.bedtime} - {issue.wakeTime}</span>
+                         </div>
+                         <div className="text-right">
+                            <span className={cn(
+                              "text-[10px] font-black px-2 py-1 rounded-md uppercase whitespace-nowrap",
+                              issue.bedDiff > 60 ? "bg-coral/10 text-coral" : "bg-teal/10 text-teal"
+                            )}>
+                              {Math.round(issue.bedDiff / 60)}h {issue.bedDiff % 60}m drift
+                            </span>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                   
+                   <div className="mt-6 p-5 bg-amber/10 rounded-2xl border border-amber/20">
+                      <h4 className="text-[12px] font-black text-amber uppercase mb-2">Normalization Tip</h4>
+                      <p className="text-[14px] font-medium text-navy/80 m-0 leading-relaxed">
+                        Your sleep timing drifted more than 1 hour from your target on {sleepIssues.length} days this week. 
+                        To normalize, aim for a **"Sunlock"** tomorrow morning: 10 mins of natural light within 30 mins of waking to reset your circadian clock.
+                      </p>
+                   </div>
+                </div>
+              )}
+
               <div className="markdown-body">
                 <ReactMarkdown>{insight}</ReactMarkdown>
               </div>
             </div>
 
-            <div className="mt-16 pt-10 border-t border-off-white">
-               <div className="flex flex-col items-center text-center">
-                  <h4 className="text-[11px] font-black text-navy uppercase tracking-widest mb-6">Was this insight helpful?</h4>
-                  <div className="flex gap-4 relative">
-                     <button 
-                       onClick={() => handleFeedback('up')}
-                       className={cn(
-                         "w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90",
-                         feedback === 'up' ? "bg-teal text-white shadow-lg shadow-teal/20" : "bg-off-white text-slate hover:bg-teal/10 hover:text-teal"
-                       )}
-                     >
-                       <ThumbsUp size={24} fill={feedback === 'up' ? "currentColor" : "none"} />
-                     </button>
-                     <button 
-                       onClick={() => handleFeedback('down')}
-                       className={cn(
-                         "w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90",
-                         feedback === 'down' ? "bg-red-500 text-white shadow-lg shadow-red-500/20" : "bg-off-white text-slate hover:bg-red-500/10 hover:text-red-500"
-                       )}
-                     >
-                       <ThumbsDown size={24} fill={feedback === 'down' ? "currentColor" : "none"} />
-                     </button>
-
-                     <AnimatePresence>
-                       {showThanks && (
-                         <motion.div 
-                           initial={{ opacity: 0, y: 10 }}
-                           animate={{ opacity: 1, y: 0 }}
-                           exit={{ opacity: 0 }}
-                           className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-center gap-2 text-teal font-black uppercase text-[10px] tracking-widest whitespace-nowrap bg-teal/10 px-4 py-2 rounded-full"
-                         >
-                           <CheckCircle size={14} /> Thank you for the feedback!
-                         </motion.div>
-                       )}
-                     </AnimatePresence>
-                  </div>
-               </div>
+            <div className="mt-16 pt-10 border-t border-off-white min-h-[140px] flex flex-col items-center justify-center">
+               <AnimatePresence mode="wait">
+                  {!showThanks ? (
+                    <motion.div 
+                      key="feedback-question"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="flex flex-col items-center text-center"
+                    >
+                       <h4 className="text-[11px] font-black text-navy uppercase tracking-widest mb-6">Was this insight helpful?</h4>
+                       <div className="flex gap-4">
+                          <button 
+                            onClick={() => handleFeedback('up')}
+                            className={cn(
+                              "w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90",
+                              feedback === 'up' ? "bg-teal text-white shadow-lg shadow-teal/20" : "bg-off-white text-slate hover:bg-teal/10 hover:text-teal"
+                            )}
+                          >
+                            <ThumbsUp size={24} fill={feedback === 'up' ? "currentColor" : "none"} />
+                          </button>
+                          <button 
+                            onClick={() => handleFeedback('down')}
+                            className={cn(
+                              "w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90",
+                              feedback === 'down' ? "bg-red-500 text-white shadow-lg shadow-red-500/20" : "bg-off-white text-slate hover:bg-red-500/10 hover:text-red-500"
+                            )}
+                          >
+                            <ThumbsDown size={24} fill={feedback === 'down' ? "currentColor" : "none"} />
+                          </button>
+                       </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div 
+                      key="feedback-thanks"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 1.1 }}
+                      className="flex items-center gap-3 text-teal font-black uppercase text-[12px] tracking-widest whitespace-nowrap bg-teal/5 border border-teal/10 px-8 py-4 rounded-full shadow-sm"
+                    >
+                       <CheckCircle size={18} /> 
+                       <span>Thank you for the feedback!</span>
+                    </motion.div>
+                  )}
+               </AnimatePresence>
             </div>
 
             <div className="mt-12 pt-8 border-t border-off-white flex flex-col items-center text-center">

@@ -36,10 +36,11 @@ export function AIPatterns({ userId, domain, logs, profile }: AIPatternsProps) {
       return;
     }
 
-    // 2. Persistent Daily Cache
-    // Unique key includes domain, userId, log count, and today's date
+    // 2. Persistent Daily Cache with Log Fingerprint
+    // Unique key includes domain, userId, log count, last log timestamp, and today's date
+    const lastLogTime = logs.length > 0 ? (logs[0] as { loggedAt?: string; completedAt?: string }).loggedAt || (logs[0] as { loggedAt?: string; completedAt?: string }).completedAt || '' : '';
     const today = new Date().toISOString().split('T')[0];
-    const cacheKey = `ai_insight_${domain}_${userId}_${logs.length}_${today}`;
+    const cacheKey = `ai_insight_${domain}_${userId}_${logs.length}_${lastLogTime}_${today}`;
     
     if (isForce) {
       localStorage.removeItem(cacheKey);
@@ -50,6 +51,8 @@ export function AIPatterns({ userId, domain, logs, profile }: AIPatternsProps) {
         return;
       }
     }
+
+    if (loading) return; // Prevent concurrent calls
 
     setLoading(true);
     setError(false);
@@ -81,20 +84,14 @@ export function AIPatterns({ userId, domain, logs, profile }: AIPatternsProps) {
     } finally {
       setLoading(false);
     }
-  }, [domain, logs, profile, userId]);
+  }, [domain, logs, profile, userId, loading]);
 
   useEffect(() => {
-    let active = true;
-    if (active) {
-      // Small delay to avoid "setState in effect" warning if it's too fast
-      const timer = setTimeout(() => {
-        fetchInsight();
-      }, 0);
-      return () => {
-        active = false;
-        clearTimeout(timer);
-      };
-    }
+    // 1.5s debounce to allow logs to stabilize and avoid burst fetches
+    const timer = setTimeout(() => {
+      fetchInsight();
+    }, 1500);
+    return () => clearTimeout(timer);
   }, [fetchInsight]);
 
   if (loading) {
@@ -145,7 +142,9 @@ export function AIPatterns({ userId, domain, logs, profile }: AIPatternsProps) {
         state: { 
           insight,
           domain,
-          date: new Date().toISOString() // Or get from cache if needed
+          logs,
+          profile,
+          date: new Date().toISOString()
         } 
       });
     }

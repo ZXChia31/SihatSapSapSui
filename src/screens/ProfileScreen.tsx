@@ -70,6 +70,7 @@ export function ProfileScreen() {
 
   const [feedback, setFeedback] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const handleUpdateProfile = async () => {
     if (!user) return;
@@ -466,13 +467,27 @@ export function ProfileScreen() {
       </section>
 
       <div className="pb-10">
-        <Button variant="destructive" onClick={() => signOut()}>
+        <Button 
+          variant="destructive" 
+          onClick={() => {
+            if (!showLogoutConfirm) {
+              setShowLogoutConfirm(true);
+              setTimeout(() => setShowLogoutConfirm(false), 3000);
+            } else {
+              signOut();
+            }
+          }}
+          className={cn(
+            "transition-all duration-300",
+            showLogoutConfirm ? "bg-red-600 scale-[1.02]" : ""
+          )}
+        >
           <div className="flex items-center gap-3">
              <LogOut size={20} />
-             Log Out
+             {showLogoutConfirm ? 'Tap again to Log Out' : 'Log Out'}
           </div>
         </Button>
-        <p className="text-center text-light-slate text-xs mt-6">Version 1.2.0 (SihatSapSapSui)</p>
+        <p className="text-center text-light-slate text-xs mt-6">Version 1.2.0 (SihatLoop)</p>
       </div>
 
       {/* Profile Edit Overlay */}

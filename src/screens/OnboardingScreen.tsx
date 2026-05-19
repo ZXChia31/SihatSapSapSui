@@ -17,33 +17,33 @@ import { OperationType, handleFirestoreError } from '../lib/firebase';
 import { HABIT_OPTIONS } from '../constants';
 
 export function OnboardingScreen() {
-  const { user } = useFirebase();
+  const { user, profile } = useFirebase();
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const totalSteps = 4;
 
   const [formData, setFormData] = useState({
-    age: '',
-    gender: 'prefer_not_to_say',
-    weight: '', // kg
-    height: '', // cm
+    age: profile?.age?.toString() || '',
+    gender: profile?.gender || 'prefer_not_to_say',
+    weight: profile?.weight?.toString() || '',
+    height: profile?.height?.toString() || '',
     habits: {
-      sleep: [] as string[],
-      eat: [] as string[],
-      move: [] as string[],
+      sleep: profile?.habits?.sleep ? profile.habits.sleep.split('. ') : [] as string[],
+      eat: profile?.habits?.eat ? profile.habits.eat.split('. ') : [] as string[],
+      move: profile?.habits?.move ? profile.habits.move.split('. ') : [] as string[],
     },
-    sleepTarget: '8',
-    sleepBedtime: '23:00',
-    sleepWakeTime: '07:00',
-    eatTarget: '3',
-    nutritionTargets: {
+    sleepTarget: profile?.sleepTargetHours?.toString() || '8',
+    sleepBedtime: profile?.sleepTargetBedtime || '23:00',
+    sleepWakeTime: profile?.sleepTargetWakeTime || '07:00',
+    eatTarget: profile?.dailyHealthyMealTarget?.toString() || '3',
+    nutritionTargets: profile?.nutritionTargets || {
       protein: 150,
       fat: 70,
       fiber: 30
     },
-    moveTarget: '3',
-    moveDurationTarget: '150',
-    aiFocusPreferences: [] as string[],
+    moveTarget: profile?.weeklyActivityTarget?.toString() || '3',
+    moveDurationTarget: profile?.weeklyActivityDurationTarget?.toString() || '150',
+    aiFocusPreferences: profile?.aiFocusPreferences || [] as string[],
   });
 
   const bmi = useMemo(() => {

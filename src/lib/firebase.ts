@@ -8,7 +8,6 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { 
   initializeFirestore, 
   doc, 
-  getDocFromServer,
   persistentLocalCache,
   persistentMultipleTabManager,
   collection,
@@ -30,19 +29,6 @@ export const db = initializeFirestore(app, {
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-
-export async function testConnection() {
-  try {
-    // Attempt to read a dummy doc to verify connection
-    await getDocFromServer(doc(db, 'system', 'connection_test'));
-    console.log("Firebase connection verified.");
-  } catch (error) {
-    console.warn("Bootstrap connection test:", error);
-  }
-}
-
-// Automatically test connection on load
-testConnection();
 
 export const signIn = () => signInWithPopup(auth, googleProvider);
 export const signOut = () => auth.signOut();

@@ -8,7 +8,7 @@ import { Layout } from '../components/Layout';
 import { Card, Button, ConfirmModal } from '../components/UI';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, orderBy, addDoc, limit, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, addDoc, limit, updateDoc, deleteDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 import { OperationType, handleFirestoreError } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
@@ -26,6 +26,7 @@ export function SleepScreen() {
   const [showLogForm, setShowLogForm] = useState(false);
   const [editingLog, setEditingLog] = useState<SleepLog | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Form State
   const [bedtime, setBedtime] = useState('22:30');
@@ -119,8 +120,35 @@ export function SleepScreen() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    setError(null);
+
+    // Date validation
+    const selectedDate = new Date(date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (selectedDate > today) {
+      setError("You cannot log sleep for a future date.");
+      return;
+    }
 
     const hours = calculateHours(bedtime, wakeTime);
+    
+    // Duration validation
+    if (hours === 0) {
+      setError("Bedtime and wake time cannot be the same. Please enter a valid duration.");
+      return;
+    }
+
+    if (hours < 0.25) { // 15 mins
+      setError("Sleep session must be at least 15 minutes long.");
+      return;
+    }
+
+    if (hours > 18) {
+      setError("Please check your times. A single sleep session cannot exceed 18 hours in this app.");
+      return;
+    }
+
     const logData: Omit<SleepLog, 'id'> = {
       userId: user.uid,
       date,
@@ -179,6 +207,7 @@ export function SleepScreen() {
     setWakeTime('06:30');
     setMood(3);
     setDate(format(new Date(), 'yyyy-MM-dd'));
+    setError(null);
   };
 
   const getMoodIcon = (rating: number) => {
@@ -217,11 +246,11 @@ export function SleepScreen() {
             <TrendingUp size={18} className="text-amber" />
             <h3 className="text-[11px] font-black text-amber uppercase tracking-[0.2em]">Weekly Consistency</h3>
           </div>
-          <div className="flex items-end gap-2 mb-2 relative z-10">
+          <div className="flex items-baseline gap-2 mb-2 relative z-10">
             <span className="text-[48px] font-black text-navy leading-none">
-              {logs.length > 0 ? (logs.reduce((acc, l) => acc + l.hoursSlept, 0) / logs.length).toFixed(1) : '0'}
+              {logs.length > 0 ? (logs.reduce((acc, l) => acc + l.hoursSlept, 0) / logs.length).toFixed(1) : '0.0'}
             </span>
-            <span className="text-lg font-black text-slate/40 mb-1.5 uppercase">hrs/night</span>
+            <span className="text-[18px] font-black text-slate/40 uppercase tracking-tight">Hrs / Sleep Session</span>
           </div>
           <div className="w-full h-2 bg-off-white rounded-full overflow-hidden relative z-10">
             <motion.div 
@@ -248,7 +277,7 @@ export function SleepScreen() {
                  onClick={() => setShowLogForm(true)}
                  className="text-amber font-bold text-sm mt-2 underline"
               >
-                Record your first night
+                Record your first sleep
               </button>
             </div>
           ) : (
@@ -320,7 +349,7 @@ export function SleepScreen() {
               className="bg-white w-full rounded-t-[32px] sm:rounded-[24px] p-8 pb-10 max-w-[420px] max-h-[95vh] overflow-y-auto cursor-default"
             >
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-black text-amber">{editingLog ? 'Edit Night' : 'Record Night'}</h2>
+                <h2 className="text-2xl font-black text-amber">{editingLog ? 'Edit Sleep' : 'Record Sleep'}</h2>
                 <button onClick={resetForm} className="text-slate p-1 hover:bg-off-white rounded-full transition-colors"><X size={24} /></button>
               </div>
 
@@ -336,15 +365,74 @@ export function SleepScreen() {
                 </div>
 
                 <div className="flex flex-col gap-4">
+                  <div className="relative h-24 bg-off-white rounded-[24px] mb-2 flex flex-col items-center justify-center overflow-hidden border border-slate/5 shadow-inner">
+                    <div className="absolute inset-x-0 top-0 h-1 flex justify-between px-2">
+                       {[0, 6, 12, 18, 24].map(h => (
+                         <div key={h} className="w-px h-full bg-slate/10 relative">
+                           <span className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-bold text-slate/30">{h}:00</span>
+                         </div>
+                       ))}
+                    </div>
+                    
+                    <div className="absolute inset-x-4 h-2 bg-slate/10 rounded-full top-8 overflow-hidden">
+                       {(() => {
+                         const startMin = parseInt(bedtime.split(':')[0]) * 60 + parseInt(bedtime.split(':')[1]);
+                         const endMin = parseInt(wakeTime.split(':')[0]) * 60 + parseInt(wakeTime.split(':')[1]);
+                         const duration = calculateHours(bedtime, wakeTime);
+                         
+                         if (startMin <= endMin) {
+                           // Same day
+                           return (
+                             <motion.div 
+                               initial={false}
+                               animate={{ 
+                                 left: `${(startMin / (24 * 60)) * 100}%`,
+                                 width: `${(duration / 24) * 100}%`
+                               }}
+                               className="absolute inset-y-0 bg-amber rounded-full shadow-[0_0_12px_rgba(255,193,7,0.4)]"
+                             />
+                           );
+                         } else {
+                           // Wraps around midnight
+                           return (
+                             <>
+                               <motion.div 
+                                 initial={false}
+                                 animate={{ 
+                                   left: `${(startMin / (24 * 60)) * 100}%`,
+                                   width: `${((24 * 60 - startMin) / (24 * 60)) * 100}%`
+                                 }}
+                                 className="absolute inset-y-0 bg-amber"
+                               />
+                               <motion.div 
+                                 initial={false}
+                                 animate={{ 
+                                   left: '0%',
+                                   width: `${(endMin / (24 * 60)) * 100}%`
+                                 }}
+                                 className="absolute inset-y-0 bg-amber"
+                               />
+                             </>
+                           );
+                         }
+                       })()}
+                    </div>
+
+                    <div className="mt-8 flex flex-col items-center relative z-10">
+                      <span className="text-[28px] font-black text-navy leading-none">{calculateHours(bedtime, wakeTime).toFixed(1)}</span>
+                      <span className="text-[10px] font-black text-slate/50 uppercase tracking-[0.2em] mt-1">Hrs Sleep Session</span>
+                    </div>
+                  </div>
+
                   <div className="flex flex-col gap-2">
-                    <label className="text-[11px] font-black tracking-widest text-slate uppercase px-1">Bedtime</label>
+                    <label className="text-[11px] font-black tracking-widest text-slate uppercase px-1">Session Start</label>
                     <TimePicker 
                       value={bedtime}
                       onChange={setBedtime}
                     />
                   </div>
                   <div className="flex flex-col gap-2">
-                    <label className="text-[11px] font-black tracking-widest text-slate uppercase px-1">Wake Up</label>
+                    <label className="text-[11px] font-black tracking-widest text-slate uppercase px-1">Session End</label>
                     <TimePicker 
                       value={wakeTime}
                       onChange={setWakeTime}
@@ -353,7 +441,7 @@ export function SleepScreen() {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-[11px] font-black tracking-widest text-slate uppercase">Waking Mood</label>
+                  <label className="text-[11px] font-black tracking-widest text-slate uppercase">Session Mood</label>
                   <div className="flex justify-between gap-2">
                     {[1, 2, 3, 4, 5].map((m) => (
                       <button
@@ -376,8 +464,23 @@ export function SleepScreen() {
                 </div>
 
                 <div className="mt-6 flex flex-col gap-3">
+                  <AnimatePresence>
+                    {error && (
+                      <motion.div 
+                        initial={{ opacity: 0, height: 0, y: -10 }}
+                        animate={{ opacity: 1, height: 'auto', y: 0 }}
+                        exit={{ opacity: 0, height: 0, y: -10 }}
+                        className="p-4 bg-coral/10 border border-coral/20 rounded-2xl flex items-center gap-3 overflow-hidden mb-2"
+                      >
+                        <div className="w-6 h-6 rounded-full bg-coral text-white flex items-center justify-center shrink-0">
+                          <X size={14} />
+                        </div>
+                        <p className="text-navy text-xs font-bold leading-tight">{error}</p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   <Button type="submit" domain="sleep">
-                    {editingLog ? 'Update Night' : 'Log Night'}
+                    {editingLog ? 'Update Sleep' : 'Log Sleep'}
                   </Button>
                   <Button type="button" variant="ghost" onClick={resetForm}>
                     Cancel
