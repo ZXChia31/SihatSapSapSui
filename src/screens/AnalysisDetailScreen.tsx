@@ -5,26 +5,40 @@
 
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Card } from '../components/UI';
-import { Sparkles, ArrowLeft, Share2, Calendar, ThumbsUp, ThumbsDown, CheckCircle } from 'lucide-react';
+import { Sparkles, ArrowLeft, Share2, Calendar, ThumbsUp, ThumbsDown, CheckCircle, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
+import { useFirebase } from '../contexts/FirebaseContext';
 import { User, SleepLog } from '../types';
 
 export function AnalysisDetailScreen() {
   const { domain: domainParam } = useParams<{ domain: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const insight = location.state?.insight as string;
-  const analysisDate = location.state?.date || new Date().toISOString();
+  const { profile: firebaseProfile } = useFirebase();
   const domain = (location.state?.domain as string) || domainParam || 'Analysis';
+  const domainKey = domain.toLowerCase();
+  const logs = (location.state?.logs || []) as SleepLog[];
+  const profile = (location.state?.profile as User | undefined) || firebaseProfile;
+
+  // Derive analysis data from profile (most recent) or location state (initial)
+  const profileAnalysis = profile?.aiAnalyses?.[domainKey];
+  const insight = profileAnalysis?.text || (location.state?.insight as string) || null;
+  const analysisDate = profileAnalysis?.updatedAt || (location.state?.date as string) || new Date().toISOString();
+  
+  // Only loading if we have nothing and profile isn't loaded yet
+  const loading = !insight && !profile;
 
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
   const [showThanks, setShowThanks] = useState(false);
 
-  const logs = (location.state?.logs || []) as SleepLog[];
-  const profile = location.state?.profile as User | undefined;
+  // Scroll to top on mount
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   const isSleep = domain.toLowerCase() === 'sleep';
   const isEat = domain.toLowerCase() === 'eat';
 
@@ -102,6 +116,15 @@ export function AnalysisDetailScreen() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-off-white flex flex-col items-center justify-center p-8 text-center text-navy font-black">
+        <Loader2 className="animate-spin mb-4" size={32} />
+        <p className="uppercase tracking-[0.2em] text-[10px]">Retrieving AI Analysis...</p>
+      </div>
+    );
+  }
 
   if (!insight) {
     return (

@@ -55,6 +55,13 @@ export interface User {
     sleepAlerts: boolean;
     aiInsights: boolean;
   };
+  aiAnalyses?: {
+    [key: string]: {
+      text: string;
+      updatedAt: string;
+      fingerprint: string;
+    };
+  };
 }
 
 export interface SleepLog {

@@ -44,6 +44,21 @@ export async function trackAIUsage(userId: string) {
   }
 }
 
+export async function savePatternAnalysis(userId: string, domain: string, text: string, fingerprint: string) {
+  const userRef = doc(db, 'users', userId);
+  try {
+    await updateDoc(userRef, {
+      [`aiAnalyses.${domain.toLowerCase()}`]: {
+        text,
+        updatedAt: new Date().toISOString(),
+        fingerprint
+      }
+    });
+  } catch (err) {
+    console.error('Failed to save pattern analysis:', err);
+  }
+}
+
 export async function generateDailyInsight(
   userId: string,
   profile: User,

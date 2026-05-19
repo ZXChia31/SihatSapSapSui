@@ -10,7 +10,7 @@ interface GeminiError {
 }
 
 const PRIMARY_MODEL = "gemini-3-flash-preview";
-const FALLBACK_MODELS = ["gemini-flash-latest", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-3.1-flash-lite"];
+const FALLBACK_MODELS = ["gemini-flash-latest", "gemini-3.1-flash-lite", "gemini-3-pro-preview"];
 
 // Simple promise-based queue to limit concurrency to 1 request at a time
 let requestQueue: Promise<void> = Promise.resolve();
