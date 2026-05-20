@@ -21,7 +21,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with long polling to ensure connection in sandboxed environments
+// Initialize Firestore with strictly forced long polling to ensure reliable connection in sandboxed preview environments
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
   experimentalForceLongPolling: true,

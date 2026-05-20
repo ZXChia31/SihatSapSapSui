@@ -12,11 +12,40 @@ export interface DailyScores {
   overallScore: number;
 }
 
-export function calculateSleepScore(log: SleepLog, profile: User): number {
-  if (!log) return 0;
+export function calculateSleepScore(logOrLogs: SleepLog | SleepLog[], profile: User): number {
+  if (!logOrLogs) return 0;
   
+  let aggregatedLog: SleepLog;
+  
+  if (Array.isArray(logOrLogs)) {
+    if (logOrLogs.length === 0) return 0;
+    // Group them: Sum sleep hours, find primary session bedtime, average mood rating
+    const totalHours = logOrLogs.reduce((sum, l) => sum + l.hoursSlept, 0);
+    const avgMood = Math.round(logOrLogs.reduce((sum, l) => sum + l.moodRating, 0) / logOrLogs.length);
+    
+    // Find longest session to use its bedtime and wakeTime
+    let primarySession = logOrLogs[0];
+    for (let i = 1; i < logOrLogs.length; i++) {
+      if (logOrLogs[i].hoursSlept > primarySession.hoursSlept) {
+        primarySession = logOrLogs[i];
+      }
+    }
+    
+    aggregatedLog = {
+      userId: primarySession.userId,
+      date: primarySession.date,
+      bedtime: primarySession.bedtime,
+      wakeTime: primarySession.wakeTime,
+      hoursSlept: totalHours,
+      moodRating: avgMood,
+      loggedAt: primarySession.loggedAt
+    };
+  } else {
+    aggregatedLog = logOrLogs;
+  }
+
   const targetHours = profile.sleepTargetHours || 8;
-  const hours = log.hoursSlept;
+  const hours = aggregatedLog.hoursSlept;
   
   // 1. Duration Score (60 pts)
   // Gaussian-like dropoff: perfect at target, drops if too little OR too much
@@ -35,12 +64,12 @@ export function calculateSleepScore(log: SleepLog, profile: User): number {
   
   // 2. Quality Score (30 pts)
   const qualityMap = [0, 0, 7, 15, 23, 30]; // 1-5 scale
-  const qualityScore = qualityMap[log.moodRating] || 0;
+  const qualityScore = qualityMap[aggregatedLog.moodRating] || 0;
   
   // 3. Timing Score (10 pts)
   // Sleeping before midnight is better for circadian rhythm
   let timingScore = 10;
-  const [bedtimeH] = log.bedtime.split(':').map(Number);
+  const [bedtimeH] = aggregatedLog.bedtime.split(':').map(Number);
   // If bedtime is after 6am and before 8pm, it's likely "shifted"
   if (bedtimeH >= 6 && bedtimeH < 20) {
     timingScore = 0;
@@ -154,7 +183,8 @@ export function calculateStreaks(sleepLogs: SleepLog[], mealLogs: MealLog[], act
     const m = getLogsForDay(mealLogs, dateStr) as MealLog[];
     const a = getLogsForDay(activityLogs, dateStr) as ActivityLog[];
     
-    const sleepOk = s.length > 0 && s[0].hoursSlept >= (profile.sleepTargetHours - 1);
+    const totalSlept = s.reduce((sum, l) => sum + l.hoursSlept, 0);
+    const sleepOk = s.length > 0 && totalSlept >= (profile.sleepTargetHours - 1);
     const eatOk = m.length >= (profile.dailyHealthyMealTarget || 3);
     const moveOk = a.length > 0;
     

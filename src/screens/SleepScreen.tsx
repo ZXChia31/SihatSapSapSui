@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Layout } from '../components/Layout';
 import { Card, Button, ConfirmModal } from '../components/UI';
 import { useFirebase } from '../contexts/FirebaseContext';
@@ -27,6 +27,17 @@ export function SleepScreen() {
   const [editingLog, setEditingLog] = useState<SleepLog | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const averageSleepPerDay = useMemo(() => {
+    if (logs.length === 0) return 0;
+    const dailyTotals: { [date: string]: number } = {};
+    logs.forEach(log => {
+      dailyTotals[log.date] = (dailyTotals[log.date] || 0) + log.hoursSlept;
+    });
+    const days = Object.keys(dailyTotals);
+    const sum = days.reduce((acc, d) => acc + dailyTotals[d], 0);
+    return sum / days.length;
+  }, [logs]);
 
   // Form State
   const [bedtime, setBedtime] = useState('22:30');
@@ -66,14 +77,23 @@ export function SleepScreen() {
     return () => { isMounted = false; };
   }, [fetchLogs]);
 
-  const updateLoopScore = async (currentDate: string, sleepLog: SleepLog | null) => {
+  const updateLoopScore = async (currentDate: string) => {
     if (!user || !profile) return;
     try {
       const scoreId = `${user.uid}_${currentDate}`;
       const scoreRef = doc(db, 'loopScores', scoreId);
       const scoreSnap = await getDoc(scoreRef);
       
-      const newSleepScore = sleepLog ? calculateSleepScore(sleepLog, profile) : 0;
+      // Fetch all sleep logs on this date to support multiple sleep sessions per day
+      const q = query(
+        collection(db, 'sleepLogs'),
+        where('userId', '==', user.uid),
+        where('date', '==', currentDate)
+      );
+      const snap = await getDocs(q);
+      const dayLogs = snap.docs.map(doc => doc.data() as SleepLog);
+      
+      const newSleepScore = dayLogs.length > 0 ? calculateSleepScore(dayLogs, profile) : 0;
       
       if (scoreSnap.exists()) {
         const scoreData = scoreSnap.data();
@@ -122,11 +142,9 @@ export function SleepScreen() {
     if (!user) return;
     setError(null);
 
-    // Date validation
-    const selectedDate = new Date(date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (selectedDate > today) {
+    // Date validation - use string comparison to ensure timezone-safe future date check
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    if (date > todayStr) {
       setError("You cannot log sleep for a future date.");
       return;
     }
@@ -167,7 +185,7 @@ export function SleepScreen() {
         await addDoc(collection(db, path), logData);
       }
       
-      await updateLoopScore(date, logData as SleepLog);
+      await updateLoopScore(date);
       
       resetForm();
       fetchLogs();
@@ -185,7 +203,7 @@ export function SleepScreen() {
       await deleteDoc(doc(db, path, id));
       setLogs(prev => prev.filter(log => log.id !== id));
       
-      await updateLoopScore(logToDelete.date, null);
+      await updateLoopScore(logToDelete.date);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -248,14 +266,14 @@ export function SleepScreen() {
           </div>
           <div className="flex items-baseline gap-2 mb-2 relative z-10">
             <span className="text-[48px] font-black text-navy leading-none">
-              {logs.length > 0 ? (logs.reduce((acc, l) => acc + l.hoursSlept, 0) / logs.length).toFixed(1) : '0.0'}
+              {averageSleepPerDay.toFixed(1)}
             </span>
-            <span className="text-[18px] font-black text-slate/40 uppercase tracking-tight">Hrs / Sleep Session</span>
+            <span className="text-[18px] font-black text-slate/40 uppercase tracking-tight">Hrs / Day</span>
           </div>
           <div className="w-full h-2 bg-off-white rounded-full overflow-hidden relative z-10">
             <motion.div 
                initial={{ width: 0 }}
-               animate={{ width: `${Math.min(100, (logs.reduce((acc, l) => acc + l.hoursSlept, 0) / (logs.length || 1)) / (profile?.sleepTarget || 8) * 100)}%` }}
+               animate={{ width: `${Math.min(100, (averageSleepPerDay / (profile?.sleepTargetHours || 8)) * 100)}%` }}
                className="h-full bg-amber shadow-[0_0_12px_rgba(255,193,7,0.3)]"
             />
           </div>

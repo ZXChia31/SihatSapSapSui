@@ -73,6 +73,10 @@ export async function generateDailyInsight(
       body: JSON.stringify({ profile, sleep, meals, move }),
     });
     
+    if (response.status === 429) {
+      return "AI usage hit its quota and let the AI rest for a while.";
+    }
+    
     if (!response.ok) throw new Error("Failed to fetch daily insight");
     
     const data = await response.json();

@@ -9,8 +9,8 @@ interface GeminiError {
   code?: number;
 }
 
-const PRIMARY_MODEL = "gemini-3-flash-preview";
-const FALLBACK_MODELS = ["gemini-flash-latest", "gemini-3.1-flash-lite", "gemini-3-pro-preview"];
+const PRIMARY_MODEL = "gemini-3.5-flash";
+const FALLBACK_MODELS = ["gemini-3.1-flash-lite", "gemini-flash-latest"];
 
 // Simple promise-based queue to limit concurrency to 1 request at a time
 let requestQueue: Promise<void> = Promise.resolve();
@@ -209,7 +209,7 @@ async function startServer() {
         errStr.toLowerCase().includes('quota') || errStr.toLowerCase().includes('demand');
 
       if (isCapacityError) {
-        return res.json({ text: "AI is currently resting to save energy! Your daily insight will return shortly. Keep looping!" });
+        return res.json({ text: "AI usage hit its quota and let the AI rest for a while. Keep looping!" });
       }
       res.status(500).json({ error: "Failed to generate daily insight" });
     }

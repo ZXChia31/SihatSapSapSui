@@ -118,6 +118,14 @@ export function DashboardScreen() {
 
   const fetchDailyInsight = useCallback(async () => {
     if (!user || !profile) return;
+    
+    // Check local client quota/balance limit
+    const balance = profile.aiUsage?.balance ?? 100;
+    if (balance <= 0) {
+      setDailyInsight("AI usage hit its quota and let the AI rest for a while.");
+      return;
+    }
+
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     const insightPath = `dailyInsights/${user.uid}_${todayStr}`;
     const insightRef = doc(db, insightPath);
@@ -146,8 +154,12 @@ export function DashboardScreen() {
       const meals = mealLogs;
       const move = activityLogs;
 
-      // Simple fingerprint: count of logs
-      const fingerprint = `${sleep ? 1 : 0}_${meals.length}_${move.length}`;
+      // Detailed content fingerprint representing the actual contents and details of today's logs
+      const sleepFingerprint = sleepLogs.map(s => `${s.hoursSlept}-${s.moodRating}-${s.bedtime}-${s.wakeTime}`).join('|');
+      const mealsFingerprint = mealLogs.map(m => `${m.mealSlot}-${m.overallHealthRating}-${m.proteinGrams || 0}`).join('|');
+      const moveFingerprint = activityLogs.map(a => `${a.activityName}-${a.durationMinutes}-${a.moodRating}`).join('|');
+      const profileFingerprint = `${profile.sleepTargetHours || 8}_${profile.dailyHealthyMealTarget || 3}_${profile.weeklyActivityTarget || 3}`;
+      const fingerprint = `${sleepFingerprint}__${mealsFingerprint}__${moveFingerprint}__${profileFingerprint}`;
 
       if (snap.exists() && snap.data().fingerprint === fingerprint) {
         setDailyInsight(snap.data().insightText);
@@ -200,9 +212,10 @@ export function DashboardScreen() {
       let sleepScore = 0;
       let sleepSubtext = 'No log today';
       if (todaySleepLogs.length > 0) {
-        const log = todaySleepLogs[0];
-        sleepScore = calculateSleepScore(log, profile);
-        sleepSubtext = `${log.hoursSlept.toFixed(2)}h · Mood: ${log.moodRating}/5`;
+        sleepScore = calculateSleepScore(todaySleepLogs, profile);
+        const totalHours = todaySleepLogs.reduce((acc, l) => acc + l.hoursSlept, 0);
+        const avgMood = Math.round(todaySleepLogs.reduce((acc, l) => acc + l.moodRating, 0) / todaySleepLogs.length);
+        sleepSubtext = `${totalHours.toFixed(1)}h · Mood: ${avgMood}/5`;
       }
 
       const todayMealLogs = allMealLogs.filter(l => l.date === todayStr);

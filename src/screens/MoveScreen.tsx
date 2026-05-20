@@ -21,6 +21,14 @@ import { cn } from '../lib/utils';
 import { AIPatterns } from '../components/AIPatterns';
 import { getDoc, setDoc } from 'firebase/firestore';
 
+const STATIC_CONFETTI = Array.from({ length: 25 }, (_, i) => ({
+  xOffset: (i * 37) % 360 - 180,
+  scale: 0.5 + ((i * 13) % 10) / 20,
+  duration: 2.2 + ((i * 7) % 5) * 0.4,
+  delay: ((i * 11) % 8) * 0.12,
+  direction: (i % 2 === 0 ? 1 : -1)
+}));
+
 export function MoveScreen() {
   const { user, profile } = useFirebase();
   const navigate = useNavigate();
@@ -31,6 +39,8 @@ export function MoveScreen() {
   const [isManualLogOpen, setIsManualLogOpen] = useState(false);
   const [editingLog, setEditingLog] = useState<ActivityLog | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [completedWorkoutTitle, setCompletedWorkoutTitle] = useState('');
 
   // Manual Form State
   const [activityName, setActivityName] = useState('');
@@ -198,6 +208,9 @@ export function MoveScreen() {
   const handleSaveActivity = async () => {
     if (!user) return;
 
+    const isGuided = !!selectedWorkout;
+    const workoutTitle = selectedWorkout?.title || '';
+
     const logDate = format(new Date(), 'yyyy-MM-dd');
     const logData: Omit<ActivityLog, 'id'> = {
       userId: user.uid,
@@ -230,6 +243,11 @@ export function MoveScreen() {
       
       resetForms();
       fetchLogs();
+
+      if (isGuided) {
+        setCompletedWorkoutTitle(workoutTitle);
+        setShowCelebration(true);
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -730,6 +748,92 @@ export function MoveScreen() {
                   }
                 }}>Start Guided Step-by-Step</Button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Celebratory Guided Workout Completion Overlay */}
+      <AnimatePresence>
+        {showCelebration && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-navy/80 z-[100] flex items-center justify-center p-6"
+            onClick={() => setShowCelebration(false)}
+          >
+            {/* Confetti Physics */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+              {STATIC_CONFETTI.map((conf, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ 
+                    y: -50, 
+                    x: conf.xOffset, 
+                    rotate: 0, 
+                    scale: conf.scale,
+                    opacity: 1 
+                  }}
+                  animate={{ 
+                    y: 800, 
+                    rotate: 360 * conf.direction, 
+                    opacity: 0.1 
+                  }}
+                  transition={{ 
+                    duration: conf.duration, 
+                    repeat: Infinity,
+                    delay: conf.delay
+                  }}
+                  className={cn(
+                    "absolute w-3.5 h-3.5 rounded-sm pointer-events-none top-0 left-1/2",
+                    i % 3 === 0 ? "bg-amber shadow-[0_0_8px_rgba(255,193,7,0.4)]" : 
+                    i % 3 === 1 ? "bg-violet shadow-[0_0_8px_rgba(124,58,237,0.4)]" : 
+                    "bg-teal shadow-[0_0_8px_rgba(0,200,150,0.4)]"
+                  )}
+                />
+              ))}
+            </div>
+
+            <motion.div
+              initial={{ scale: 0.85, y: 50, opacity: 0 }}
+              animate={{ 
+                scale: 1, 
+                y: 0, 
+                opacity: 1,
+                transition: { type: "spring", stiffness: 350, damping: 22 } 
+              }}
+              exit={{ scale: 0.9, opacity: 0, transition: { duration: 0.2 } }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white w-full max-w-[380px] rounded-[36px] p-8 shadow-2xl border border-violet/10 flex flex-col items-center text-center relative overflow-hidden"
+            >
+              {/* Highlight Accent Borders */}
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-violet via-teal to-amber" />
+              <div className="absolute -top-12 -right-12 w-32 h-32 bg-violet/10 rounded-full blur-2xl" />
+              <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-teal/10 rounded-full blur-2xl" />
+
+              <motion.div 
+                initial={{ scale: 0, rotate: -45 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: "spring", delay: 0.1, stiffness: 220 }}
+                className="w-20 h-20 rounded-3xl bg-violet/10 flex items-center justify-center text-violet mb-6 relative"
+              >
+                <div className="absolute inset-0 rounded-3xl bg-violet/5 animate-ping" />
+                <Trophy size={36} className="relative z-10" />
+              </motion.div>
+
+              <h3 className="text-[24px] font-black text-navy leading-tight mb-2">Beautifully Logged! 🏆</h3>
+              <p className="text-violet font-black uppercase text-[10px] tracking-widest bg-violet/5 px-3 py-1 rounded-full mb-5">
+                {completedWorkoutTitle}
+              </p>
+              
+              <p className="text-slate/80 text-[13.5px] font-medium leading-relaxed mb-8 max-w-[280px]">
+                Amazing effort taking action for your health loop. Thank you for showing up for yourself today! Your Move tracker has registered this completed session. 🎉
+              </p>
+
+              <Button domain="move" onClick={() => setShowCelebration(false)} className="w-full">
+                Thank You, Let's Keep Moving!
+              </Button>
             </motion.div>
           </motion.div>
         )}

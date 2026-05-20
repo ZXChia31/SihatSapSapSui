@@ -216,8 +216,8 @@ export function AIPatterns({ userId, domain, logs, profile }: AIPatternsProps) {
                 </div>
               ) : isLimitReached ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black text-coral uppercase tracking-tighter bg-coral/5 px-2 py-0.5 rounded-md">Daily Limit Reached</span>
-                  <div className="w-1.5 h-1.5 rounded-full bg-coral" />
+                  <span className="text-[10px] font-black text-coral uppercase tracking-tighter bg-coral/5 px-2 py-0.5 rounded-md">AI Resting</span>
+                  <div className="w-1.5 h-1.5 rounded-full bg-coral animate-pulse" />
                 </div>
               ) : error ? (
                 <span className="text-[10px] font-bold text-coral uppercase">Sync Error</span>
@@ -276,6 +276,16 @@ export function AIPatterns({ userId, domain, logs, profile }: AIPatternsProps) {
               View Full Report
             </button>
           </div>
+        </motion.div>
+      )}
+
+      {!insight && isLimitReached && (
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-4 pt-4 border-t border-slate/5 text-[12px] font-medium text-slate/60 leading-relaxed italic"
+        >
+          "AI usage hit its quota and let the AI rest for a while."
         </motion.div>
       )}
     </Card>

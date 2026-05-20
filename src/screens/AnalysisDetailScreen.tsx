@@ -12,12 +12,14 @@ import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { User, SleepLog } from '../types';
+import { db } from '../lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 export function AnalysisDetailScreen() {
   const { domain: domainParam } = useParams<{ domain: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { profile: firebaseProfile } = useFirebase();
+  const { profile: firebaseProfile, user } = useFirebase();
   const domain = (location.state?.domain as string) || domainParam || 'Analysis';
   const domainKey = domain.toLowerCase();
   const logs = (location.state?.logs || []) as SleepLog[];
@@ -32,6 +34,7 @@ export function AnalysisDetailScreen() {
   const loading = !insight && !profile;
 
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+  const [selectedSentiment, setSelectedSentiment] = useState<string | null>(null);
   const [showThanks, setShowThanks] = useState(false);
 
   // Scroll to top on mount
@@ -87,10 +90,33 @@ export function AnalysisDetailScreen() {
 
   const sleepIssues = getSleepTimingInconsistencies();
 
-  const handleFeedback = (type: 'up' | 'down') => {
+  const handleGranularFeedback = async (optionId: string, type: 'up' | 'down') => {
     setFeedback(type);
+    setSelectedSentiment(optionId);
     setShowThanks(true);
-    setTimeout(() => setShowThanks(false), 3000);
+
+    // Save actual feedback in Firestore!
+    if (user) {
+      try {
+        const dateStr = new Date().toISOString().split('T')[0];
+        await setDoc(doc(db, 'insightsFeedback', `${user.uid}_${domainKey}_${dateStr}`), {
+          userId: user.uid,
+          domain: domainKey,
+          optionId,
+          type,
+          timestamp: new Date().toISOString()
+        }, { merge: true });
+        console.log("Feedback saved to Firestore successfully");
+      } catch (err) {
+        console.warn('Failed to save granular feedback to firestore:', err);
+      }
+    }
+    
+    setTimeout(() => {
+      setShowThanks(false);
+      setSelectedSentiment(null);
+      setFeedback(null);
+    }, 4000);
   };
 
   const handleShare = async () => {
@@ -253,52 +279,88 @@ export function AnalysisDetailScreen() {
               </div>
             </div>
 
-            <div className="mt-16 pt-10 border-t border-off-white min-h-[140px] flex flex-col items-center justify-center">
-               <AnimatePresence mode="wait">
-                  {!showThanks ? (
-                    <motion.div 
-                      key="feedback-question"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="flex flex-col items-center text-center"
-                    >
-                       <h4 className="text-[11px] font-black text-navy uppercase tracking-widest mb-6">Was this insight helpful?</h4>
-                       <div className="flex gap-4">
-                          <button 
-                            onClick={() => handleFeedback('up')}
-                            className={cn(
-                              "w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90",
-                              feedback === 'up' ? "bg-teal text-white shadow-lg shadow-teal/20" : "bg-off-white text-slate hover:bg-teal/10 hover:text-teal"
-                            )}
-                          >
-                            <ThumbsUp size={24} fill={feedback === 'up' ? "currentColor" : "none"} />
-                          </button>
-                          <button 
-                            onClick={() => handleFeedback('down')}
-                            className={cn(
-                              "w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90",
-                              feedback === 'down' ? "bg-red-500 text-white shadow-lg shadow-red-500/20" : "bg-off-white text-slate hover:bg-red-500/10 hover:text-red-500"
-                            )}
-                          >
-                            <ThumbsDown size={24} fill={feedback === 'down' ? "currentColor" : "none"} />
-                          </button>
-                       </div>
-                    </motion.div>
-                  ) : (
-                    <motion.div 
-                      key="feedback-thanks"
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 1.1 }}
-                      className="flex items-center gap-3 text-teal font-black uppercase text-[12px] tracking-widest whitespace-nowrap bg-teal/5 border border-teal/10 px-8 py-4 rounded-full shadow-sm"
-                    >
-                       <CheckCircle size={18} /> 
-                       <span>Thank you for the feedback!</span>
-                    </motion.div>
-                  )}
-               </AnimatePresence>
-            </div>
+             <div className="mt-16 pt-10 border-t border-off-white min-h-[140px] flex flex-col items-center justify-center w-full">
+                <AnimatePresence mode="wait">
+                   {!showThanks ? (
+                     <motion.div 
+                       key="feedback-question"
+                       initial={{ opacity: 0, y: 10 }}
+                       animate={{ opacity: 1, y: 0 }}
+                       exit={{ opacity: 0, y: -10 }}
+                       className="flex flex-col items-center text-center w-full max-w-lg"
+                     >
+                        <h4 className="text-[11px] font-black text-navy uppercase tracking-widest mb-6">Was this insight helpful?</h4>
+                        
+                        {/* Thumbs Selection */}
+                        <div className="flex gap-4 mb-8">
+                           <button 
+                             onClick={() => handleGranularFeedback('thumbs_up', 'up')}
+                             className={cn(
+                               "w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90 border border-slate/5",
+                               feedback === 'up' ? "bg-teal text-white shadow-lg shadow-teal/20" : "bg-white text-slate hover:bg-teal/10 hover:text-teal"
+                             )}
+                           >
+                             <ThumbsUp size={24} fill={feedback === 'up' ? "currentColor" : "none"} />
+                           </button>
+                           <button 
+                             onClick={() => handleGranularFeedback('thumbs_down', 'down')}
+                             className={cn(
+                               "w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90 border border-slate/5",
+                               feedback === 'down' ? "bg-red-500 text-white shadow-lg shadow-red-500/20" : "bg-white text-slate hover:bg-red-500/10 hover:text-red-500"
+                             )}
+                           >
+                             <ThumbsDown size={24} fill={feedback === 'down' ? "currentColor" : "none"} />
+                           </button>
+                        </div>
+
+                        {/* Granular Feedback Choices */}
+                        <div className="w-full">
+                           <p className="text-[11px] font-black text-slate/50 uppercase tracking-widest mb-4">Or select a detailed reaction:</p>
+                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                              {[
+                                { id: 'change_habit', text: 'This insight helped me change a habit', icon: '🌱', type: 'up' as const },
+                                { id: 'need_data', text: 'I need more data for this insight', icon: '📊', type: 'down' as const },
+                                { id: 'very_accurate', text: 'This was highly accurate and personal', icon: '🎯', type: 'up' as const },
+                                { id: 'too_generic', text: 'The tips feel impractical or too generic', icon: '💡', type: 'down' as const }
+                              ].map((option) => (
+                                 <button
+                                   key={option.id}
+                                   onClick={() => handleGranularFeedback(option.id, option.type)}
+                                   className={cn(
+                                     "flex items-center gap-3 p-4 rounded-2xl border text-left transition-all hover:scale-[1.02] active:scale-98",
+                                     selectedSentiment === option.id 
+                                       ? "bg-teal/10 border-teal text-teal shadow-sm" 
+                                       : "bg-white border-slate/5 text-navy hover:border-navy/15"
+                                   )}
+                                 >
+                                    <span className="text-xl leading-none">{option.icon}</span>
+                                    <span className="text-[13px] font-bold leading-tight flex-1">{option.text}</span>
+                                 </button>
+                              ))}
+                           </div>
+                        </div>
+                     </motion.div>
+                   ) : (
+                     <motion.div 
+                       key="feedback-thanks"
+                       initial={{ opacity: 0, scale: 0.9 }}
+                       animate={{ opacity: 1, scale: 1 }}
+                       exit={{ opacity: 0, scale: 1.1 }}
+                       className="flex flex-col items-center gap-4 text-center bg-teal/5 border border-teal/10 p-8 rounded-3xl max-w-md w-full shadow-sm"
+                     >
+                        <div className="w-12 h-12 rounded-2xl bg-teal/10 text-teal flex items-center justify-center">
+                           <CheckCircle size={24} />
+                        </div>
+                        <div>
+                           <h5 className="font-black text-teal uppercase text-[12px] tracking-widest mb-1">Feedback Registered!</h5>
+                           <p className="text-[13px] font-medium text-slate/80 leading-relaxed mb-0">
+                             Thank you! Your sentiment has been shared directly with our loop learning engines to personalize your ongoing dashboard intelligence.
+                           </p>
+                        </div>
+                     </motion.div>
+                   )}
+                </AnimatePresence>
+             </div>
 
             <div className="mt-12 pt-8 border-t border-off-white flex flex-col items-center text-center">
               <div className="w-12 h-1 bg-off-white rounded-full mb-6" />
